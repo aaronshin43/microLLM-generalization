@@ -1,0 +1,35 @@
+# AGENTS.md
+
+This file provides guidance to coding agents when working with code in this repository.
+
+## Repository
+
+ Treat `infinite_generalization/documents/` as the source of truth for what the code, when written, must do.
+
+Key documents (read these before writing code):
+- `infinite_generalization/documents/PLAN.md` — overall research plan and staged experiment progression
+- `infinite_generalization/documents/TASK.md` — exact spec of the first synthetic task (Token-Presence Detection), including vocab, data generation rules, splits, and evaluation slices
+- `infinite_generalization/documents/initial_step.md` — rationale for starting with a 1-layer, ≤2-head, `d_model=64` transformer
+- `infinite_generalization/documents/infinite_length_generalization_transformers.md` — background notes
+
+## Research Goal
+
+Study **length generalization** in micro LLMs (<1M params): if a model trains only on short sequences (length 10), does the *same learned computation* extrapolate to lengths 20, 50, 100, 200, 500, 1000? The deeper question is whether the model learns a length-invariant algorithm vs. a length-specific shortcut.
+
+## Architectural Decisions Already Made
+
+These are committed in `PLAN.md` and should be respected unless the user explicitly revisits them:
+
+- **Fresh lightweight PyTorch implementation** — *not* nanoGPT. The first task is binary classification, not causal LM, and the project needs full control over pooling, positional encoding, and attention inspection.
+- **Stage 0 first**: non-transformer max-pooling baseline (Embedding → per-token MLP → max-pool → classifier) before any transformer work. Confirm baseline generalizes nearly perfectly across all eval lengths before touching transformers.
+- **Stage 1 transformer**: 1 encoder layer, 1–2 heads, `d_model=64`, **no positional encoding**, max pooling.
+- **No length-specific components** in either model: no learned absolute positional embeddings, no sequence flattening, no recurrent state.
+- **Evaluation length sweep is mandatory**: every model must be evaluated at lengths `10, 20, 50, 100, 200, 500, 1000` with at least overall / positive-class / negative-class accuracy reported.
+
+## Build / Test Commands
+
+None yet — no `pyproject.toml`, `requirements.txt`, or test runner exists. When implementing Stage 0, set up a minimal Python/PyTorch project and add the relevant commands to this file.
+
+## Platform Notes
+
+- Working tree is on Windows (`D:\03_Coding\microLLM-generalization`); the default shell is PowerShell. Use PowerShell syntax for any commands you suggest (`$env:VAR`, `;` instead of `&&`, etc.).\
