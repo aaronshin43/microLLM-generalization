@@ -28,8 +28,37 @@ These are committed in `PLAN.md` and should be respected unless the user explici
 
 ## Build / Test Commands
 
+Current Stage 0 commands are listed in the `Stage 0 Commands` section below.
+
 None yet — no `pyproject.toml`, `requirements.txt`, or test runner exists. When implementing Stage 0, set up a minimal Python/PyTorch project and add the relevant commands to this file.
 
 ## Platform Notes
 
 - Working tree is on Windows (`D:\03_Coding\microLLM-generalization`); the default shell is PowerShell. Use PowerShell syntax for any commands you suggest (`$env:VAR`, `;` instead of `&&`, etc.).\
+
+**Every comments must be written in English**
+
+## Stage 0 Commands
+
+Smoke test:
+
+```powershell
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage0 --smoke-test
+```
+
+Unit tests:
+
+```powershell
+Set-Location infinite_generalization
+python -m unittest discover -s tests
+```
+
+Default Stage 0 run:
+
+```powershell
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage0
+```
