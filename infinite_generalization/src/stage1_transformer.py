@@ -10,6 +10,7 @@ import torch
 from torch import nn
 
 from audit import save_audit_examples
+from attention import save_attention_analysis
 from config import Stage1Config, TaskConfig
 from data import make_balanced_token_presence_dataset
 from models import TransformerTokenPresenceClassifier, count_parameters
@@ -54,10 +55,26 @@ def parse_args() -> argparse.Namespace:
         help="Save audit CSV files with sample sequences and model outputs.",
     )
     parser.add_argument(
+        "--save-attention",
+        action="store_true",
+        help="Save attention summary CSV files for selected evaluation examples.",
+    )
+    parser.add_argument(
+        "--save-raw-attention",
+        action="store_true",
+        help="Save raw attention tensors for selected examples. Can use substantial disk space.",
+    )
+    parser.add_argument(
         "--examples-per-class",
         type=int,
         default=4,
         help="Number of positive and negative examples to save per split or length.",
+    )
+    parser.add_argument(
+        "--attention-examples-per-class",
+        type=int,
+        default=2,
+        help="Number of positive and negative examples per length for attention analysis.",
     )
     parser.add_argument(
         "--preview-tokens",
@@ -225,6 +242,17 @@ def main() -> None:
             output_dir=output_dir,
             examples_per_class=args.examples_per_class,
             preview_tokens=args.preview_tokens,
+        )
+
+    if args.save_attention:
+        save_attention_analysis(
+            model,
+            task=task,
+            config=config,
+            device=device,
+            output_dir=output_dir,
+            examples_per_class=args.attention_examples_per_class,
+            save_raw=args.save_raw_attention,
         )
 
     print("\nLength sweep:")

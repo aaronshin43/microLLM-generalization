@@ -80,6 +80,14 @@ $env:PYTHONPATH = "src"
 python -m stage1_transformer
 ```
 
+Attention summary run:
+
+```powershell
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage1_transformer --save-attention
+```
+
 ## Activity Log
 
 - Keep `activitylog.md` in the project root directory.

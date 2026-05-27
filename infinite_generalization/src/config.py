@@ -12,7 +12,7 @@ class TaskConfig:
     vocab_size: int = 16
     target_token: int = 1
     train_length: int = 10
-    eval_lengths: tuple[int, ...] = (10, 20, 50, 100, 200, 500, 1000)
+    eval_lengths: tuple[int, ...] = (10, 20, 50, 100, 200, 500, 700, 800, 850, 900, 950, 1000, 1100)
     positive_fraction: float = 0.5
 
     def to_dict(self) -> dict[str, object]:

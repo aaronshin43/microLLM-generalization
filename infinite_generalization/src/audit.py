@@ -160,7 +160,7 @@ def save_audit_examples(
 
     test_rows: list[dict[str, object]] = []
     for index, length in enumerate(task.eval_lengths):
-        generator = torch.Generator().manual_seed(config.seed + 20_000 + index)
+        generator = torch.Generator().manual_seed(config.seed + 10_000 + index)
         test_inputs, test_labels = make_balanced_token_presence_dataset(
             num_examples=config.test_examples,
             length=length,

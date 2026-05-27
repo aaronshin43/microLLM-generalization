@@ -57,4 +57,12 @@ $env:PYTHONPATH = "src"
 python -m stage1_transformer
 ```
 
+Save attention summaries for selected evaluation examples:
+
+```powershell
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage1_transformer --save-attention
+```
+
 Outputs are written to `runs/stage1_transformer_maxpool/`.
