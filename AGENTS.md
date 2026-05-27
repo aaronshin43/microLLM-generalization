@@ -44,7 +44,7 @@ Smoke test:
 ```powershell
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
-python -m stage0 --smoke-test
+python -m stage0_baseline --smoke-test
 ```
 
 Unit tests:
@@ -59,7 +59,7 @@ Default Stage 0 run:
 ```powershell
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
-python -m stage0
+python -m stage0_baseline
 ```
 
 ## Activity Log
@@ -68,3 +68,8 @@ python -m stage0
 - Write activity log entries in English.
 - Use a title (e.g. May 26 Activity Log) and a short body for each entry.
 - Keep entries concise; do not include long implementation notes unless explicitly requested.
+
+## Commit Guidelines
+
+- Write commit messages in English.
+- Keep commit messages short and focused on the main change.

@@ -44,7 +44,7 @@ Smoke test:
 ```powershell
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
-python -m stage0 --smoke-test
+python -m stage0_baseline --smoke-test
 ```
 
 Unit tests:
@@ -59,7 +59,7 @@ Default Stage 0 run:
 ```powershell
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
-python -m stage0
+python -m stage0_baseline
 ```
 
 ## Activity Log

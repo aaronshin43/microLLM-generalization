@@ -11,7 +11,7 @@ Run a quick smoke test:
 ```powershell
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
-python -m stage0 --smoke-test
+python -m stage0_baseline --smoke-test
 ```
 
 Run unit tests:
@@ -26,7 +26,7 @@ Run the default Stage 0 experiment:
 ```powershell
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
-python -m stage0
+python -m stage0_baseline
 ```
 
 Save audit examples with model outputs:
@@ -34,7 +34,7 @@ Save audit examples with model outputs:
 ```powershell
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
-python -m stage0 --save-examples
+python -m stage0_baseline --save-examples
 ```
 
 Outputs are written to `runs/stage0_maxpool_baseline/`.
