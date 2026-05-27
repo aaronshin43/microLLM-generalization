@@ -38,3 +38,23 @@ python -m stage0_baseline --save-examples
 ```
 
 Outputs are written to `runs/stage0_maxpool_baseline/`.
+
+## Stage 1: Minimal Transformer
+
+Run a quick smoke test:
+
+```powershell
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage1_transformer --smoke-test
+```
+
+Run the default Stage 1 experiment:
+
+```powershell
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage1_transformer
+```
+
+Outputs are written to `runs/stage1_transformer_maxpool/`.

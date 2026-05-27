@@ -62,6 +62,24 @@ $env:PYTHONPATH = "src"
 python -m stage0_baseline
 ```
 
+## Stage 1 Commands
+
+Smoke test:
+
+```powershell
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage1_transformer --smoke-test
+```
+
+Default Stage 1 run:
+
+```powershell
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage1_transformer
+```
+
 ## Activity Log
 
 - Keep `activitylog.md` in the project root directory.

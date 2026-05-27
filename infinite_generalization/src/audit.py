@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from config import Stage0Config, TaskConfig
+from config import Stage0Config, Stage1Config, TaskConfig
 from data import make_balanced_token_presence_dataset
 
 
@@ -124,7 +124,7 @@ def save_audit_examples(
     val_inputs: torch.Tensor,
     val_labels: torch.Tensor,
     task: TaskConfig,
-    config: Stage0Config,
+    config: Stage0Config | Stage1Config,
     device: torch.device,
     output_dir: Path,
     examples_per_class: int,
@@ -184,4 +184,3 @@ def save_audit_examples(
     write_audit_csv(examples_dir / "train_examples.csv", train_rows)
     write_audit_csv(examples_dir / "val_examples.csv", val_rows)
     write_audit_csv(examples_dir / "test_examples_by_length.csv", test_rows)
-

@@ -11,7 +11,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from config import Stage0Config, TaskConfig
+from config import Stage0Config, Stage1Config, TaskConfig
 from data import make_balanced_token_presence_dataset
 from metrics import binary_accuracy_slices
 
@@ -139,13 +139,14 @@ def evaluate_by_length(
     model: nn.Module,
     *,
     task: TaskConfig,
-    config: Stage0Config,
+    config: Stage0Config | Stage1Config,
     device: torch.device,
 ) -> list[dict[str, float | int]]:
     """Evaluate the trained model on every required sequence length."""
 
     model.eval()
     criterion = nn.BCEWithLogitsLoss()
+    eval_batch_size = getattr(config, "eval_batch_size", config.batch_size)
     rows: list[dict[str, float | int]] = []
 
     for index, length in enumerate(task.eval_lengths):
@@ -159,7 +160,7 @@ def evaluate_by_length(
         loader = make_loader(
             inputs,
             labels,
-            batch_size=config.batch_size,
+            batch_size=eval_batch_size,
             shuffle=False,
         )
         loss, metrics = evaluate_dataset(
@@ -204,4 +205,3 @@ def write_metrics_csv(path: Path, rows: list[dict[str, float | int]]) -> None:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-

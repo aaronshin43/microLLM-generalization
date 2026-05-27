@@ -43,3 +43,29 @@ class Stage0Config:
         """Return a JSON-serializable representation of the training config."""
 
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class Stage1Config:
+    """Training configuration for the minimal transformer baseline."""
+
+    seed: int = 1234
+    train_examples: int = 50_000
+    val_examples: int = 10_000
+    test_examples: int = 10_000
+    batch_size: int = 512
+    eval_batch_size: int = 32
+    epochs: int = 10
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.0
+    d_model: int = 64
+    num_heads: int = 1
+    num_layers: int = 1
+    dim_feedforward: int = 128
+    dropout: float = 0.0
+    output_dir: str = "runs/stage1_transformer_maxpool"
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable representation of the training config."""
+
+        return asdict(self)
