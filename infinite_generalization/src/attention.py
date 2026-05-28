@@ -10,7 +10,11 @@ from torch import nn
 
 from audit import select_audit_indices, target_positions
 from config import Stage1Config, TaskConfig
-from data import make_balanced_token_presence_dataset
+from data import (
+    diagnostic_slice_specs,
+    make_negative_dataset,
+    make_positive_dataset,
+)
 
 
 def attention_entropy(attention: torch.Tensor) -> torch.Tensor:
@@ -84,6 +88,8 @@ def write_attention_summary_csv(path: Path, rows: list[dict[str, object]]) -> No
 
     fieldnames = [
         "length",
+        "slice",
+        "label_type",
         "dataset_index",
         "label",
         "prediction",
@@ -91,6 +97,7 @@ def write_attention_summary_csv(path: Path, rows: list[dict[str, object]]) -> No
         "logit",
         "probability",
         "target_count",
+        "target_region",
         "target_positions",
         "pooled_l2_norm",
         "pooled_abs_mean",
@@ -121,7 +128,7 @@ def save_attention_analysis(
     examples_per_class: int,
     save_raw: bool,
 ) -> None:
-    """Save attention summaries and optional raw attention tensors for audit samples."""
+    """Save attention summaries for controlled diagnostic slices."""
 
     if not hasattr(model, "forward_with_attention"):
         raise TypeError("model must implement forward_with_attention() to save attention analysis")
@@ -136,60 +143,84 @@ def save_attention_analysis(
     model.eval()
 
     for length_index, length in enumerate(task.eval_lengths):
-        generator = torch.Generator().manual_seed(config.seed + 10_000 + length_index)
-        inputs, labels = make_balanced_token_presence_dataset(
-            num_examples=config.test_examples,
-            length=length,
-            task=task,
-            generator=generator,
-        )
-        selected_indices = select_audit_indices(labels, examples_per_class=examples_per_class)
-
-        for selected_index in selected_indices:
-            tokens = inputs[selected_index]
-            label = int(labels[selected_index].item())
-            batch_tokens = tokens.unsqueeze(0).to(device)
-
-            logits, pooled, attention_layers = model.forward_with_attention(batch_tokens)
-            logit = float(logits.squeeze(0).cpu().item())
-            probability = float(torch.sigmoid(logits).squeeze(0).cpu().item())
-            prediction = int(logit >= 0.0)
-
-            raw_attention_file = ""
-            if save_raw:
-                raw_attention_file = (
-                    f"length_{length}_label_{label}_index_{selected_index}_attention.pt"
+        for slice_index, (slice_name, label_type, target_count, target_region) in enumerate(
+            diagnostic_slice_specs(length)
+        ):
+            generator = torch.Generator().manual_seed(
+                config.seed + 40_000 + length_index * 100 + slice_index
+            )
+            if label_type == "negative":
+                inputs, labels = make_negative_dataset(
+                    num_examples=config.diagnostic_examples,
+                    length=length,
+                    task=task,
+                    generator=generator,
                 )
-                torch.save(
-                    {
-                        "tokens": tokens.cpu(),
-                        "label": label,
-                        "logit": logit,
-                        "probability": probability,
-                        "pooled": pooled.squeeze(0).cpu(),
-                        "attention_layers": [layer.cpu() for layer in attention_layers],
-                    },
-                    raw_dir / raw_attention_file,
+            else:
+                inputs, labels = make_positive_dataset(
+                    num_examples=config.diagnostic_examples,
+                    length=length,
+                    task=task,
+                    generator=generator,
+                    target_count=target_count,
+                    target_region=target_region,
                 )
 
-            base_row = {
-                "length": length,
-                "dataset_index": selected_index,
-                "label": label,
-                "prediction": prediction,
-                "correct": prediction == label,
-                "logit": logit,
-                "probability": probability,
-                "target_count": int(tokens.eq(task.target_token).sum().item()),
-                "target_positions": target_positions(tokens, target_token=task.target_token),
-                **pooled_activation_stats(pooled),
-                "raw_attention_file": raw_attention_file,
-            }
-            for summary in summarize_attention_for_sample(
-                attention_layers=attention_layers,
-                tokens=tokens,
-                target_token=task.target_token,
-            ):
-                rows.append({**base_row, **summary})
+            selected_indices = select_audit_indices(
+                labels,
+                examples_per_class=examples_per_class,
+            )
+
+            for selected_index in selected_indices:
+                tokens = inputs[selected_index]
+                label = int(labels[selected_index].item())
+                batch_tokens = tokens.unsqueeze(0).to(device)
+
+                logits, pooled, attention_layers = model.forward_with_attention(batch_tokens)
+                logit = float(logits.squeeze(0).cpu().item())
+                probability = float(torch.sigmoid(logits).squeeze(0).cpu().item())
+                prediction = int(logit >= 0.0)
+
+                raw_attention_file = ""
+                if save_raw:
+                    raw_attention_file = (
+                        f"length_{length}_{slice_name}_index_{selected_index}_attention.pt"
+                    )
+                    torch.save(
+                        {
+                            "tokens": tokens.cpu(),
+                            "slice": slice_name,
+                            "label_type": label_type,
+                            "label": label,
+                            "logit": logit,
+                            "probability": probability,
+                            "pooled": pooled.squeeze(0).cpu(),
+                            "attention_layers": [layer.cpu() for layer in attention_layers],
+                        },
+                        raw_dir / raw_attention_file,
+                    )
+
+                base_row = {
+                    "length": length,
+                    "slice": slice_name,
+                    "label_type": label_type,
+                    "dataset_index": selected_index,
+                    "label": label,
+                    "prediction": prediction,
+                    "correct": prediction == label,
+                    "logit": logit,
+                    "probability": probability,
+                    "target_count": int(tokens.eq(task.target_token).sum().item()),
+                    "target_region": target_region,
+                    "target_positions": target_positions(tokens, target_token=task.target_token),
+                    **pooled_activation_stats(pooled),
+                    "raw_attention_file": raw_attention_file,
+                }
+                for summary in summarize_attention_for_sample(
+                    attention_layers=attention_layers,
+                    tokens=tokens,
+                    target_token=task.target_token,
+                ):
+                    rows.append({**base_row, **summary})
 
     write_attention_summary_csv(attention_dir / "attention_summary.csv", rows)

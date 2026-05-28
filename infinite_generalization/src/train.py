@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from config import Stage0Config, Stage1Config, TaskConfig
 from data import (
+    diagnostic_slice_specs,
     make_balanced_token_presence_dataset,
     make_negative_dataset,
     make_positive_dataset,
@@ -202,24 +203,8 @@ def evaluate_diagnostic_slices_by_length(
     rows: list[dict[str, float | int | str]] = []
 
     for length_index, length in enumerate(task.eval_lengths):
-        slice_specs = [
-            ("negative_zero_target", "negative", 0, "random"),
-            ("positive_exactly_one_random", "positive", 1, "random"),
-            ("positive_multi_target_k3", "positive", min(3, length), "random"),
-            ("positive_multi_target_k10", "positive", min(10, length), "random"),
-            (
-                "positive_multi_target_density_1pct",
-                "positive",
-                min(max(2, length // 100), length),
-                "random",
-            ),
-            ("positive_target_begin", "positive", 1, "begin"),
-            ("positive_target_middle", "positive", 1, "middle"),
-            ("positive_target_end", "positive", 1, "end"),
-        ]
-
         for slice_index, (slice_name, label_type, target_count, target_region) in enumerate(
-            slice_specs
+            diagnostic_slice_specs(length)
         ):
             generator = torch.Generator().manual_seed(
                 config.seed + 40_000 + length_index * 100 + slice_index

@@ -58,7 +58,7 @@ $env:PYTHONPATH = "src"
 python -m stage1_transformer
 ```
 
-Save attention summaries for selected evaluation examples:
+Save attention summaries for selected diagnostic-slice examples:
 
 ```powershell
 Set-Location infinite_generalization

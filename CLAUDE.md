@@ -90,6 +90,8 @@ $env:PYTHONPATH = "src"
 python -m stage1_transformer --save-attention
 ```
 
+Attention summaries are written per diagnostic slice, not only for the primary balanced evaluation set.
+
 ## Activity Log
 
 - Keep `activitylog.md` in the project root directory.
