@@ -37,11 +37,27 @@ None yet — no `pyproject.toml`, `requirements.txt`, or test runner exists. Whe
 
 **Every comments must be written in English**
 
+## Python Environment
+
+- Use a single virtual environment at the repository root: `D:\03_Coding\microLLM-generalization\.venv`.
+- Activate it before running project commands: `.\.venv\Scripts\Activate.ps1`.
+- Install dependencies from the repository root with `python -m pip install -e .\infinite_generalization`.
+- If CUDA is needed, replace the torch wheel inside the same virtual environment and run experiments with `--device cuda`.
+
+## Configuration
+
+- Tracked example configs live in `infinite_generalization/configs/`.
+- Put local experiment configs in `infinite_generalization/configs/local/`; this directory is git-ignored except for `.gitkeep`.
+- Config precedence is: dataclass defaults, YAML config values, then explicit CLI arguments.
+- YAML configs use `task` and `stage` sections. `task.eval_lengths` controls length sweeps; `stage.device` supports `auto`, `cpu`, and `cuda`.
+
 ## Stage 0 Commands
 
 Smoke test:
 
 ```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
 python -m stage0_baseline --smoke-test
@@ -50,6 +66,8 @@ python -m stage0_baseline --smoke-test
 Unit tests:
 
 ```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
 Set-Location infinite_generalization
 python -m unittest discover -s tests
 ```
@@ -57,6 +75,8 @@ python -m unittest discover -s tests
 Default Stage 0 run:
 
 ```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
 python -m stage0_baseline
@@ -69,6 +89,8 @@ Stage runs write `diagnostic_slices_by_length.csv` with controlled negative, mul
 Smoke test:
 
 ```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
 python -m stage1_transformer --smoke-test
@@ -77,6 +99,8 @@ python -m stage1_transformer --smoke-test
 Default Stage 1 run:
 
 ```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
 python -m stage1_transformer
@@ -85,6 +109,8 @@ python -m stage1_transformer
 Attention summary run:
 
 ```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
 python -m stage1_transformer --save-attention
