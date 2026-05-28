@@ -4,6 +4,10 @@
 
 The non-transformer max-pooling baseline generalizes perfectly across the tested length sweep. This confirms that the task itself is length-generalizable when the architecture directly matches the existential rule.
 
+The diagnostic slice evaluation also remains perfect across all tested lengths. The baseline reaches 1.0000 accuracy for zero-target negatives, exactly-one positives, multi-target positives, and target-position slices near the beginning, middle, and end of the sequence.
+
+This is an important control result: the later transformer failure is not caused by the data generator, the evaluation slices, or the intrinsic difficulty of the synthetic task. A simple permutation-invariant max-pooling detector solves all diagnostic cases cleanly.
+
 ## Stage 1: Minimal Transformer
 
 Configuration:
