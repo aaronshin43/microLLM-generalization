@@ -1,13 +1,2 @@
 # Experiment outputs
 runs/
-
-# Python caches
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/
-
-# Local environments
-.venv/
-venv/
-

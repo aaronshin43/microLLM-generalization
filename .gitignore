@@ -1,5 +1,3 @@
-activitylog.md
-
 # Python caches
 __pycache__/
 *.py[cod]
@@ -12,3 +10,6 @@ venv/
 
 # AI agent configs
 .claude/
+
+activitylog.md
+TODO.md
