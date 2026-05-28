@@ -1,2 +1,6 @@
 # Experiment outputs
 runs/
+
+# Local experiment configs
+configs/local/*
+!configs/local/.gitkeep

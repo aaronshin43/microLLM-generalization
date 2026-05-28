@@ -1,0 +1,25 @@
+task:
+  vocab_size: 16
+  target_token: 1
+  train_length: 10
+  eval_lengths: [10, 20, 50, 100, 200, 500, 700, 800, 850, 900, 950, 1000, 1100]
+  positive_fraction: 0.5
+
+stage:
+  seed: 1234
+  device: auto
+  train_examples: 50000
+  val_examples: 10000
+  test_examples: 10000
+  diagnostic_examples: 2000
+  batch_size: 512
+  eval_batch_size: 32
+  epochs: 10
+  learning_rate: 0.001
+  weight_decay: 0.0
+  d_model: 64
+  num_heads: 1
+  num_layers: 1
+  dim_feedforward: 128
+  dropout: 0.0
+  output_dir: runs/stage1_transformer_maxpool

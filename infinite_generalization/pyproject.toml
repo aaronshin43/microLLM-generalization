@@ -4,9 +4,9 @@ version = "0.1.0"
 description = "Micro-model experiments for infinite-length generalization."
 requires-python = ">=3.12"
 dependencies = [
+    "pyyaml",
     "torch",
 ]
 
 [tool.ruff]
 line-length = 100
-

@@ -10,7 +10,14 @@ import torch
 from torch import nn
 
 from audit import save_audit_examples
-from config import Stage0Config, TaskConfig
+from config import (
+    Stage0Config,
+    TaskConfig,
+    build_config,
+    load_yaml_config,
+    resolve_device,
+    split_experiment_config,
+)
 from data import make_balanced_token_presence_dataset
 from models import MaxPoolTokenPresenceClassifier, count_parameters
 from train import (
@@ -28,20 +35,22 @@ from train import (
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments for the Stage 0 baseline experiment."""
 
-    defaults = Stage0Config()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--seed", type=int, default=defaults.seed)
-    parser.add_argument("--train-examples", type=int, default=defaults.train_examples)
-    parser.add_argument("--val-examples", type=int, default=defaults.val_examples)
-    parser.add_argument("--test-examples", type=int, default=defaults.test_examples)
-    parser.add_argument("--diagnostic-examples", type=int, default=defaults.diagnostic_examples)
-    parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
-    parser.add_argument("--epochs", type=int, default=defaults.epochs)
-    parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)
-    parser.add_argument("--weight-decay", type=float, default=defaults.weight_decay)
-    parser.add_argument("--embedding-dim", type=int, default=defaults.embedding_dim)
-    parser.add_argument("--hidden-dim", type=int, default=defaults.hidden_dim)
-    parser.add_argument("--output-dir", type=str, default=defaults.output_dir)
+    parser.add_argument("--config", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default=None)
+    parser.add_argument("--eval-lengths", type=int, nargs="+", default=None)
+    parser.add_argument("--train-examples", type=int, default=None)
+    parser.add_argument("--val-examples", type=int, default=None)
+    parser.add_argument("--test-examples", type=int, default=None)
+    parser.add_argument("--diagnostic-examples", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument("--weight-decay", type=float, default=None)
+    parser.add_argument("--embedding-dim", type=int, default=None)
+    parser.add_argument("--hidden-dim", type=int, default=None)
+    parser.add_argument("--output-dir", type=str, default=None)
     parser.add_argument(
         "--smoke-test",
         action="store_true",
@@ -67,22 +76,37 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def make_config(args: argparse.Namespace) -> Stage0Config:
+def make_configs(args: argparse.Namespace) -> tuple[TaskConfig, Stage0Config]:
     """Build the training config, with small overrides for smoke tests."""
 
-    config = Stage0Config(
-        seed=args.seed,
-        train_examples=args.train_examples,
-        val_examples=args.val_examples,
-        test_examples=args.test_examples,
-        diagnostic_examples=args.diagnostic_examples,
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        embedding_dim=args.embedding_dim,
-        hidden_dim=args.hidden_dim,
-        output_dir=args.output_dir,
+    task_cli_values = {
+        "eval_lengths": args.eval_lengths,
+    }
+    cli_values = {
+        "seed": args.seed,
+        "device": args.device,
+        "train_examples": args.train_examples,
+        "val_examples": args.val_examples,
+        "test_examples": args.test_examples,
+        "diagnostic_examples": args.diagnostic_examples,
+        "batch_size": args.batch_size,
+        "epochs": args.epochs,
+        "learning_rate": args.learning_rate,
+        "weight_decay": args.weight_decay,
+        "embedding_dim": args.embedding_dim,
+        "hidden_dim": args.hidden_dim,
+        "output_dir": args.output_dir,
+    }
+    task_yaml_values, stage_yaml_values = split_experiment_config(load_yaml_config(args.config))
+    task = build_config(
+        TaskConfig,
+        yaml_values=task_yaml_values,
+        cli_values={key: value for key, value in task_cli_values.items() if value is not None},
+    )
+    config = build_config(
+        Stage0Config,
+        yaml_values=stage_yaml_values,
+        cli_values={key: value for key, value in cli_values.items() if value is not None},
     )
 
     if args.smoke_test:
@@ -96,21 +120,20 @@ def make_config(args: argparse.Namespace) -> Stage0Config:
             epochs=3,
             output_dir="runs/stage0_smoke_test",
         )
-    return config
+    return task, config
 
 
 def main() -> None:
     """Run the full Stage 0 baseline training and evaluation pipeline."""
 
     args = parse_args()
-    config = make_config(args)
-    task = TaskConfig()
+    task, config = make_configs(args)
     set_reproducibility(config.seed)
 
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(config.device)
     data_generator = torch.Generator().manual_seed(config.seed)
     loader_generator = torch.Generator().manual_seed(config.seed + 1)
 
