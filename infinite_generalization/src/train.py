@@ -12,7 +12,11 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from config import Stage0Config, Stage1Config, TaskConfig
-from data import make_balanced_token_presence_dataset
+from data import (
+    make_balanced_token_presence_dataset,
+    make_negative_dataset,
+    make_positive_dataset,
+)
 from metrics import binary_accuracy_slices
 
 
@@ -177,9 +181,90 @@ def evaluate_by_length(
                 "overall_accuracy": metrics["overall_accuracy"],
                 "positive_accuracy": metrics["positive_accuracy"],
                 "negative_accuracy": metrics["negative_accuracy"],
-                "exactly_one_positive_accuracy": metrics["exactly_one_positive_accuracy"],
             }
         )
+
+    return rows
+
+
+@torch.no_grad()
+def evaluate_diagnostic_slices_by_length(
+    model: nn.Module,
+    *,
+    task: TaskConfig,
+    config: Stage0Config | Stage1Config,
+    device: torch.device,
+) -> list[dict[str, float | int | str]]:
+    """Evaluate controlled diagnostic slices required by the research plan."""
+
+    criterion = nn.BCEWithLogitsLoss()
+    eval_batch_size = getattr(config, "eval_batch_size", config.batch_size)
+    rows: list[dict[str, float | int | str]] = []
+
+    for length_index, length in enumerate(task.eval_lengths):
+        slice_specs = [
+            ("negative_zero_target", "negative", 0, "random"),
+            ("positive_exactly_one_random", "positive", 1, "random"),
+            ("positive_multi_target_k3", "positive", min(3, length), "random"),
+            ("positive_multi_target_k10", "positive", min(10, length), "random"),
+            (
+                "positive_multi_target_density_1pct",
+                "positive",
+                min(max(2, length // 100), length),
+                "random",
+            ),
+            ("positive_target_begin", "positive", 1, "begin"),
+            ("positive_target_middle", "positive", 1, "middle"),
+            ("positive_target_end", "positive", 1, "end"),
+        ]
+
+        for slice_index, (slice_name, label_type, target_count, target_region) in enumerate(
+            slice_specs
+        ):
+            generator = torch.Generator().manual_seed(
+                config.seed + 40_000 + length_index * 100 + slice_index
+            )
+            if label_type == "negative":
+                inputs, labels = make_negative_dataset(
+                    num_examples=config.diagnostic_examples,
+                    length=length,
+                    task=task,
+                    generator=generator,
+                )
+            else:
+                inputs, labels = make_positive_dataset(
+                    num_examples=config.diagnostic_examples,
+                    length=length,
+                    task=task,
+                    generator=generator,
+                    target_count=target_count,
+                    target_region=target_region,
+                )
+
+            loader = make_loader(
+                inputs,
+                labels,
+                batch_size=eval_batch_size,
+                shuffle=False,
+            )
+            loss, metrics = evaluate_dataset(
+                model,
+                loader,
+                criterion=criterion,
+                task=task,
+                device=device,
+            )
+            rows.append(
+                {
+                    "length": length,
+                    "slice": slice_name,
+                    "label_type": label_type,
+                    "target_count": target_count,
+                    "target_region": target_region,
+                    "loss": loss,
+                    "accuracy": metrics["overall_accuracy"],
+                }
+            )
 
     return rows
 
@@ -199,7 +284,24 @@ def write_metrics_csv(path: Path, rows: list[dict[str, float | int]]) -> None:
         "overall_accuracy",
         "positive_accuracy",
         "negative_accuracy",
-        "exactly_one_positive_accuracy",
+    ]
+    with path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_diagnostic_slices_csv(path: Path, rows: list[dict[str, float | int | str]]) -> None:
+    """Write controlled diagnostic slice metrics to CSV."""
+
+    fieldnames = [
+        "length",
+        "slice",
+        "label_type",
+        "target_count",
+        "target_region",
+        "loss",
+        "accuracy",
     ]
     with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)

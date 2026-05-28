@@ -31,6 +31,7 @@ class Stage0Config:
     train_examples: int = 50_000
     val_examples: int = 10_000
     test_examples: int = 10_000
+    diagnostic_examples: int = 2_000
     batch_size: int = 512
     epochs: int = 10
     learning_rate: float = 1e-3
@@ -53,6 +54,7 @@ class Stage1Config:
     train_examples: int = 50_000
     val_examples: int = 10_000
     test_examples: int = 10_000
+    diagnostic_examples: int = 2_000
     batch_size: int = 512
     eval_batch_size: int = 32
     epochs: int = 10

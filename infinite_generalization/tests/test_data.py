@@ -13,7 +13,12 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from config import TaskConfig  # noqa: E402
-from data import _sample_non_target_tokens, make_balanced_token_presence_dataset  # noqa: E402
+from data import (  # noqa: E402
+    _sample_non_target_tokens,
+    make_balanced_token_presence_dataset,
+    make_negative_dataset,
+    make_positive_dataset,
+)
 
 
 class TokenPresenceDataTest(unittest.TestCase):
@@ -74,7 +79,38 @@ class TokenPresenceDataTest(unittest.TestCase):
                 generator=generator,
             )
 
+    def test_positive_diagnostic_dataset_controls_target_count_and_region(self) -> None:
+        task = TaskConfig()
+        generator = torch.Generator().manual_seed(321)
+
+        inputs, labels = make_positive_dataset(
+            num_examples=100,
+            length=30,
+            task=task,
+            generator=generator,
+            target_count=3,
+            target_region="begin",
+        )
+
+        target_positions = torch.nonzero(inputs.eq(task.target_token), as_tuple=False)
+        self.assertTrue(labels.eq(1).all())
+        self.assertTrue(inputs.eq(task.target_token).sum(dim=1).eq(3).all())
+        self.assertTrue(target_positions[:, 1].lt(10).all())
+
+    def test_negative_diagnostic_dataset_contains_no_targets(self) -> None:
+        task = TaskConfig()
+        generator = torch.Generator().manual_seed(654)
+
+        inputs, labels = make_negative_dataset(
+            num_examples=100,
+            length=30,
+            task=task,
+            generator=generator,
+        )
+
+        self.assertTrue(labels.eq(0).all())
+        self.assertFalse(inputs.eq(task.target_token).any())
+
 
 if __name__ == "__main__":
     unittest.main()
-

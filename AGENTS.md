@@ -62,6 +62,8 @@ $env:PYTHONPATH = "src"
 python -m stage0_baseline
 ```
 
+Stage runs write `diagnostic_slices_by_length.csv` with controlled negative, multi-target, and target-position slices. The default diagnostic slice size is `--diagnostic-examples 2000`.
+
 ## Stage 1 Commands
 
 Smoke test:

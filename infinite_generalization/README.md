@@ -37,7 +37,8 @@ $env:PYTHONPATH = "src"
 python -m stage0_baseline --save-examples
 ```
 
-Outputs are written to `runs/stage0_maxpool_baseline/`.
+Outputs are written to `runs/stage0_maxpool_baseline/`, including `diagnostic_slices_by_length.csv`.
+Diagnostic slices use `--diagnostic-examples 2000` by default.
 
 ## Stage 1: Minimal Transformer
 
@@ -62,7 +63,8 @@ Save attention summaries for selected evaluation examples:
 ```powershell
 Set-Location infinite_generalization
 $env:PYTHONPATH = "src"
-python -m stage1_transformer --save-attention
+python -m stage1_transformer --save-attention --save-examples
 ```
 
-Outputs are written to `runs/stage1_transformer_maxpool/`.
+Outputs are written to `runs/stage1_transformer_maxpool/`, including `diagnostic_slices_by_length.csv`.
+Diagnostic slices use `--diagnostic-examples 2000` by default.

@@ -15,10 +15,12 @@ from config import Stage1Config, TaskConfig
 from data import make_balanced_token_presence_dataset
 from models import TransformerTokenPresenceClassifier, count_parameters
 from train import (
+    evaluate_diagnostic_slices_by_length,
     evaluate_by_length,
     make_loader,
     run_epoch,
     set_reproducibility,
+    write_diagnostic_slices_csv,
     write_json,
     write_metrics_csv,
 )
@@ -33,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-examples", type=int, default=defaults.train_examples)
     parser.add_argument("--val-examples", type=int, default=defaults.val_examples)
     parser.add_argument("--test-examples", type=int, default=defaults.test_examples)
+    parser.add_argument("--diagnostic-examples", type=int, default=defaults.diagnostic_examples)
     parser.add_argument("--batch-size", type=int, default=defaults.batch_size)
     parser.add_argument("--eval-batch-size", type=int, default=defaults.eval_batch_size)
     parser.add_argument("--epochs", type=int, default=defaults.epochs)
@@ -93,6 +96,7 @@ def make_config(args: argparse.Namespace) -> Stage1Config:
         train_examples=args.train_examples,
         val_examples=args.val_examples,
         test_examples=args.test_examples,
+        diagnostic_examples=args.diagnostic_examples,
         batch_size=args.batch_size,
         eval_batch_size=args.eval_batch_size,
         epochs=args.epochs,
@@ -112,6 +116,7 @@ def make_config(args: argparse.Namespace) -> Stage1Config:
             train_examples=2_048,
             val_examples=512,
             test_examples=512,
+            diagnostic_examples=256,
             batch_size=128,
             eval_batch_size=64,
             epochs=3,
@@ -224,9 +229,20 @@ def main() -> None:
         )
 
     metrics_by_length = evaluate_by_length(model, task=task, config=config, device=device)
+    diagnostic_slices = evaluate_diagnostic_slices_by_length(
+        model,
+        task=task,
+        config=config,
+        device=device,
+    )
     write_json(output_dir / "history.json", history)
     write_json(output_dir / "metrics_by_length.json", metrics_by_length)
     write_metrics_csv(output_dir / "metrics_by_length.csv", metrics_by_length)
+    write_json(output_dir / "diagnostic_slices_by_length.json", diagnostic_slices)
+    write_diagnostic_slices_csv(
+        output_dir / "diagnostic_slices_by_length.csv",
+        diagnostic_slices,
+    )
     torch.save(model.state_dict(), output_dir / "model.pt")
 
     if args.save_examples:
