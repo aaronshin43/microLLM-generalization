@@ -137,3 +137,28 @@ python -m stage1_transformer --save-attention --save-examples
 
 Outputs are written to `runs/stage1_transformer_maxpool/`, including `diagnostic_slices_by_length.csv`.
 Diagnostic slices use `--diagnostic-examples 2000` by default.
+
+## Stage 2A: Multi-Length Transformer
+
+Run a quick smoke test:
+
+```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage2a_transformer_multilength --smoke-test
+```
+
+Run the default Stage 2A experiment:
+
+```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage2a_transformer_multilength --config configs/stage2a_transformer_multilength.example.yaml
+```
+
+Stage 2A keeps the Stage 1 transformer architecture fixed and trains on single-length
+batches from `stage.train_lengths`, defaulting to `[10, 20, 50, 100]`.

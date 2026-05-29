@@ -11,7 +11,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from config import Stage0Config, Stage1Config, TaskConfig
+from config import Stage0Config, Stage1Config, Stage2AConfig, TaskConfig
 from data import (
     diagnostic_slice_specs,
     make_balanced_token_presence_dataset,
@@ -89,6 +89,65 @@ def run_epoch(
     return total_loss / total_examples, binary_accuracy_slices(logits_cpu, labels_cpu)
 
 
+def run_loader_sequence(
+    model: nn.Module,
+    loaders: list[DataLoader],
+    *,
+    criterion: nn.Module,
+    device: torch.device,
+    optimizer: torch.optim.Optimizer | None = None,
+) -> tuple[float, dict[str, float]]:
+    """Run one epoch over multiple single-length loaders.
+
+    Stage 2A intentionally avoids padding and masks. Each loader contains one sequence
+    length, and this function interleaves those loaders at batch granularity.
+    """
+
+    is_training = optimizer is not None
+    model.train(is_training)
+
+    total_loss = 0.0
+    total_examples = 0
+    all_logits: list[torch.Tensor] = []
+    all_labels: list[torch.Tensor] = []
+
+    iterators = [iter(loader) for loader in loaders]
+    active = [True for _ in iterators]
+
+    while any(active):
+        for index, iterator in enumerate(iterators):
+            if not active[index]:
+                continue
+
+            try:
+                inputs, labels = next(iterator)
+            except StopIteration:
+                active[index] = False
+                continue
+
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            with torch.set_grad_enabled(is_training):
+                logits = model(inputs)
+                loss = criterion(logits, labels)
+
+            if is_training:
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                optimizer.step()
+
+            batch_size = labels.shape[0]
+            total_loss += loss.item() * batch_size
+            total_examples += batch_size
+            all_logits.append(logits.detach().cpu())
+            all_labels.append(labels.detach().cpu())
+
+    logits_cpu = torch.cat(all_logits)
+    labels_cpu = torch.cat(all_labels)
+    return total_loss / total_examples, binary_accuracy_slices(logits_cpu, labels_cpu)
+
+
 @torch.no_grad()
 def evaluate_dataset(
     model: nn.Module,
@@ -144,7 +203,7 @@ def evaluate_by_length(
     model: nn.Module,
     *,
     task: TaskConfig,
-    config: Stage0Config | Stage1Config,
+    config: Stage0Config | Stage1Config | Stage2AConfig,
     device: torch.device,
 ) -> list[dict[str, float | int]]:
     """Evaluate the trained model on every required sequence length."""
@@ -193,7 +252,7 @@ def evaluate_diagnostic_slices_by_length(
     model: nn.Module,
     *,
     task: TaskConfig,
-    config: Stage0Config | Stage1Config,
+    config: Stage0Config | Stage1Config | Stage2AConfig,
     device: torch.device,
 ) -> list[dict[str, float | int | str]]:
     """Evaluate controlled diagnostic slices required by the research plan."""

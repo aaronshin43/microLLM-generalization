@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from config import Stage0Config, Stage1Config, TaskConfig
+from config import Stage0Config, Stage1Config, Stage2AConfig, TaskConfig
 from data import make_balanced_token_presence_dataset
 
 
@@ -157,6 +157,94 @@ def save_audit_examples(
         examples_per_class=examples_per_class,
         preview_tokens=preview_tokens,
     )
+
+    test_rows: list[dict[str, object]] = []
+    for index, length in enumerate(task.eval_lengths):
+        generator = torch.Generator().manual_seed(config.seed + 10_000 + index)
+        test_inputs, test_labels = make_balanced_token_presence_dataset(
+            num_examples=config.test_examples,
+            length=length,
+            task=task,
+            generator=generator,
+        )
+        test_rows.extend(
+            build_audit_rows(
+                model,
+                test_inputs,
+                test_labels,
+                split="test",
+                length=length,
+                task=task,
+                device=device,
+                examples_per_class=examples_per_class,
+                preview_tokens=preview_tokens,
+            )
+        )
+
+    write_audit_csv(examples_dir / "train_examples.csv", train_rows)
+    write_audit_csv(examples_dir / "val_examples.csv", val_rows)
+    write_audit_csv(examples_dir / "test_examples_by_length.csv", test_rows)
+
+
+def save_multilength_audit_examples(
+    model: nn.Module,
+    *,
+    task: TaskConfig,
+    config: Stage2AConfig,
+    device: torch.device,
+    output_dir: Path,
+    examples_per_class: int,
+    preview_tokens: int,
+) -> None:
+    """Save audit examples for Stage 2A multi-length train, validation, and test splits."""
+
+    examples_dir = output_dir / "examples"
+    examples_dir.mkdir(parents=True, exist_ok=True)
+
+    train_rows: list[dict[str, object]] = []
+    val_rows: list[dict[str, object]] = []
+    for length_index, length in enumerate(config.train_lengths):
+        train_generator = torch.Generator().manual_seed(config.seed + length_index)
+        train_inputs, train_labels = make_balanced_token_presence_dataset(
+            num_examples=config.train_examples_per_length,
+            length=length,
+            task=task,
+            generator=train_generator,
+        )
+        train_rows.extend(
+            build_audit_rows(
+                model,
+                train_inputs,
+                train_labels,
+                split="train",
+                length=length,
+                task=task,
+                device=device,
+                examples_per_class=examples_per_class,
+                preview_tokens=preview_tokens,
+            )
+        )
+
+        val_generator = torch.Generator().manual_seed(config.seed + 20_000 + length_index)
+        val_inputs, val_labels = make_balanced_token_presence_dataset(
+            num_examples=config.val_examples_per_length,
+            length=length,
+            task=task,
+            generator=val_generator,
+        )
+        val_rows.extend(
+            build_audit_rows(
+                model,
+                val_inputs,
+                val_labels,
+                split="val",
+                length=length,
+                task=task,
+                device=device,
+                examples_per_class=examples_per_class,
+                preview_tokens=preview_tokens,
+            )
+        )
 
     test_rows: list[dict[str, object]] = []
     for index, length in enumerate(task.eval_lengths):

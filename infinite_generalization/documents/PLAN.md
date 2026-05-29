@@ -28,8 +28,9 @@ Start with the simplest controlled progression:
 
 1. non-transformer baseline
 2. minimal transformer
-3. pooling ablation
-4. only then add architectural complexity
+3. multi-length training intervention
+4. pooling ablation
+5. only then add architectural complexity
 
 This keeps interpretation clean and makes failures informative.
 
@@ -99,7 +100,40 @@ Main questions:
 - does accuracy degrade smoothly or abruptly?
 - do attention patterns sharpen onto the target token?
 
-## Stage 2: Pooling Ablation
+## Stage 2A: Multi-Length Training Intervention
+
+Keep the Stage 1 transformer architecture fixed:
+
+- 1 transformer encoder layer
+- 1 head or 2 heads
+- `d_model = 64`
+- no positional encoding
+- max pooling
+
+Change only the training length distribution:
+
+- Stage 1 trains on fixed length `10`
+- Stage 2A trains on multiple short lengths, initially `[10, 20, 50, 100]`
+
+Goal:
+
+- test whether the same tiny transformer can learn a length-invariant token-presence
+  algorithm when single-length shortcuts are less useful
+- separate an architectural limitation from a training-distribution limitation
+
+Main questions:
+
+- does sparse exactly-one positive accuracy remain stable beyond length 900?
+- does the positive logit margin stop drifting downward with length?
+- do diagnostic slices show improvement specifically on exactly-one positives, rather
+  than only on many-target positives?
+
+Implementation constraint:
+
+- do not introduce padding or masks in the first Stage 2A run
+- keep each mini-batch single-length and alternate across length-specific loaders
+
+## Stage 2B: Pooling Ablation
 
 Keep the transformer fixed and compare:
 
@@ -119,19 +153,19 @@ Expectation:
 
 ## Stage 3: Controlled Complexity
 
-Only after the first three stages are stable, vary:
+Only after the first stages are stable, vary:
 
 - number of layers
 - number of heads
 - positional encoding type
-- train-length distribution
+- broader train-length distributions
 
 Candidate values:
 
 - layers: `1, 2, 4`
 - heads: `1, 2, 4`
 - positional encoding: `none, sinusoidal, learned`
-- train lengths: `fixed 10` vs `uniform 5..20`
+- train lengths: `fixed 10`, `[10, 20, 50, 100]`, `uniform 5..100`
 
 ## Evaluation Plan
 
@@ -180,12 +214,12 @@ For the transformer, also track:
 
 ## Immediate Next Step
 
-Implement Stage 0 first.
+Run Stage 2A.
 
 That means:
 
-1. build the synthetic dataset generator from `TASK.md`
-2. build the non-transformer max-pooling baseline
-3. train only on length 10
-4. evaluate on the full length sweep
-5. confirm that the baseline really gives the expected behavior before touching the transformer
+1. keep the Stage 1 transformer architecture unchanged
+2. train on `[10, 20, 50, 100]` using single-length batches
+3. evaluate on the full length sweep
+4. compare sparse exactly-one positive accuracy against Stage 1
+5. inspect whether positive logits and attention summaries become more length-stable

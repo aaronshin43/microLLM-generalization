@@ -118,6 +118,28 @@ python -m stage1_transformer --save-attention
 
 Attention summaries are written per diagnostic slice, not only for the primary balanced evaluation set.
 
+## Stage 2A Commands
+
+Smoke test:
+
+```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage2a_transformer_multilength --smoke-test
+```
+
+Default Stage 2A run:
+
+```powershell
+Set-Location D:\03_Coding\microLLM-generalization
+.\.venv\Scripts\Activate.ps1
+Set-Location infinite_generalization
+$env:PYTHONPATH = "src"
+python -m stage2a_transformer_multilength --config configs/stage2a_transformer_multilength.example.yaml
+```
+
 ## Activity Log
 
 - Keep `activitylog.md` in the project root directory.

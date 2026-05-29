@@ -85,7 +85,43 @@ class Stage1Config:
         return asdict(self)
 
 
-ConfigT = TypeVar("ConfigT", TaskConfig, Stage0Config, Stage1Config)
+@dataclass(frozen=True)
+class Stage2AConfig:
+    """Training configuration for the multi-length transformer intervention."""
+
+    seed: int = 1234
+    device: str = "auto"
+    train_lengths: tuple[int, ...] = (10, 20, 50, 100)
+    train_examples_per_length: int = 12_500
+    val_examples_per_length: int = 2_500
+    test_examples: int = 10_000
+    diagnostic_examples: int = 2_000
+    batch_size: int = 256
+    eval_batch_size: int = 32
+    epochs: int = 10
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.0
+    d_model: int = 64
+    num_heads: int = 1
+    num_layers: int = 1
+    dim_feedforward: int = 128
+    dropout: float = 0.0
+    output_dir: str = "runs/stage2a_transformer_multilength"
+
+    def __post_init__(self) -> None:
+        """Normalize sequence-like config values loaded from YAML."""
+
+        object.__setattr__(self, "train_lengths", tuple(self.train_lengths))
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable representation of the training config."""
+
+        data = asdict(self)
+        data["train_lengths"] = list(self.train_lengths)
+        return data
+
+
+ConfigT = TypeVar("ConfigT", TaskConfig, Stage0Config, Stage1Config, Stage2AConfig)
 
 
 def load_yaml_config(path: str | None) -> dict[str, Any]:

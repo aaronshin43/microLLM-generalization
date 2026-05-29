@@ -12,6 +12,7 @@ sys.path.insert(0, str(SRC))
 
 from config import (  # noqa: E402
     Stage1Config,
+    Stage2AConfig,
     TaskConfig,
     build_config,
     resolve_device,
@@ -51,6 +52,15 @@ class ExperimentConfigTest(unittest.TestCase):
         )
 
         self.assertEqual(task.eval_lengths, (10, 20, 50))
+
+    def test_stage2a_config_normalizes_yaml_train_lengths_to_tuple(self) -> None:
+        config = build_config(
+            Stage2AConfig,
+            yaml_values={"train_lengths": [10, 20, 50, 100]},
+            cli_values={},
+        )
+
+        self.assertEqual(config.train_lengths, (10, 20, 50, 100))
 
     def test_resolve_device_accepts_cpu(self) -> None:
         self.assertEqual(resolve_device("cpu").type, "cpu")
