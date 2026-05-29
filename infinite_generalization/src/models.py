@@ -161,3 +161,58 @@ def count_parameters(model: nn.Module) -> int:
     """Count trainable parameters."""
 
     return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+
+
+def trainable_parameter_rows(model: nn.Module) -> list[dict[str, object]]:
+    """Return compact descriptions for every trainable parameter."""
+
+    rows: list[dict[str, object]] = []
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+
+        rows.append(
+            {
+                "name": name,
+                "shape": tuple(parameter.shape),
+                "dtype": str(parameter.dtype),
+                "device": str(parameter.device),
+                "count": parameter.numel(),
+            }
+        )
+    return rows
+
+
+def format_trainable_parameters(model: nn.Module) -> str:
+    """Format trainable parameter descriptions as a readable table."""
+
+    rows = trainable_parameter_rows(model)
+    if not rows:
+        return "No trainable parameters."
+
+    name_width = max(len(str(row["name"])) for row in rows)
+    shape_width = max(len(str(row["shape"])) for row in rows)
+    dtype_width = max(len(str(row["dtype"])) for row in rows)
+    device_width = max(len(str(row["device"])) for row in rows)
+
+    lines = [
+        "Trainable parameters:",
+        (
+            f"{'name':{name_width}}  {'shape':{shape_width}}  "
+            f"{'dtype':{dtype_width}}  {'device':{device_width}}  count"
+        ),
+        (
+            f"{'-' * name_width}  {'-' * shape_width}  "
+            f"{'-' * dtype_width}  {'-' * device_width}  -----"
+        ),
+    ]
+    total = 0
+    for row in rows:
+        count = int(row["count"])
+        total += count
+        lines.append(
+            f"{str(row['name']):{name_width}}  {str(row['shape']):{shape_width}}  "
+            f"{str(row['dtype']):{dtype_width}}  {str(row['device']):{device_width}}  {count}"
+        )
+    lines.append(f"Total trainable parameters: {total}")
+    return "\n".join(lines)

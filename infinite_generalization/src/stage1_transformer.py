@@ -20,7 +20,7 @@ from config import (
     split_experiment_config,
 )
 from data import make_balanced_token_presence_dataset
-from models import TransformerTokenPresenceClassifier, count_parameters
+from models import TransformerTokenPresenceClassifier, count_parameters, format_trainable_parameters
 from train import (
     evaluate_diagnostic_slices_by_length,
     evaluate_by_length,
@@ -94,6 +94,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=12,
         help="Number of tokens to keep at each edge for long sequence previews.",
+    )
+    parser.add_argument(
+        "--print-parameters",
+        action="store_true",
+        help="Print trainable parameter names, shapes, dtypes, devices, and counts.",
     )
     return parser.parse_args()
 
@@ -200,6 +205,9 @@ def main() -> None:
         dim_feedforward=config.dim_feedforward,
         dropout=config.dropout,
     ).to(device)
+    if args.print_parameters:
+        print(format_trainable_parameters(model))
+
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.AdamW(
         model.parameters(),
