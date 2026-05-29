@@ -16,7 +16,7 @@ class TaskConfig:
 
     vocab_size: int = 16
     target_token: int = 1
-    eval_lengths: tuple[int, ...] = (10, 20, 50, 100, 200, 500, 700, 800, 850, 900, 950, 1000, 1100)
+    eval_lengths: tuple[int, ...] = (10, 20, 50, 100, 200, 500, 700, 900, 1000)
     positive_fraction: float = 0.5
 
     def __post_init__(self) -> None:
