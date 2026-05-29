@@ -12,7 +12,7 @@ def diagnostic_slice_specs(length: int) -> list[tuple[str, str, int, str]]:
 
     return [
         ("negative_zero_target", "negative", 0, "random"),
-        ("positive_exactly_one_random", "positive", 1, "random"),
+        ("positive_single_target_random", "positive", 1, "random"),
         ("positive_multi_target_k3", "positive", min(3, length), "random"),
         ("positive_multi_target_k10", "positive", min(10, length), "random"),
         (
@@ -21,9 +21,9 @@ def diagnostic_slice_specs(length: int) -> list[tuple[str, str, int, str]]:
             min(max(2, length // 100), length),
             "random",
         ),
-        ("positive_target_begin", "positive", 1, "begin"),
-        ("positive_target_middle", "positive", 1, "middle"),
-        ("positive_target_end", "positive", 1, "end"),
+        ("positive_single_target_begin", "positive", 1, "begin"),
+        ("positive_single_target_middle", "positive", 1, "middle"),
+        ("positive_single_target_end", "positive", 1, "end"),
     ]
 
 
