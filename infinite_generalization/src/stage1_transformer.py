@@ -40,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda"), default=None)
+    parser.add_argument("--train-length", type=int, default=None)
     parser.add_argument("--eval-lengths", type=int, nargs="+", default=None)
     parser.add_argument("--train-examples", type=int, default=None)
     parser.add_argument("--val-examples", type=int, default=None)
@@ -106,6 +107,7 @@ def make_configs(args: argparse.Namespace) -> tuple[TaskConfig, Stage1Config]:
     cli_values = {
         "seed": args.seed,
         "device": args.device,
+        "train_length": args.train_length,
         "train_examples": args.train_examples,
         "val_examples": args.val_examples,
         "test_examples": args.test_examples,
@@ -165,13 +167,13 @@ def main() -> None:
 
     train_inputs, train_labels = make_balanced_token_presence_dataset(
         num_examples=config.train_examples,
-        length=task.train_length,
+        length=config.train_length,
         task=task,
         generator=data_generator,
     )
     val_inputs, val_labels = make_balanced_token_presence_dataset(
         num_examples=config.val_examples,
-        length=task.train_length,
+        length=config.train_length,
         task=task,
         generator=data_generator,
     )

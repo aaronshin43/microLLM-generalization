@@ -37,7 +37,8 @@ Copy-Item configs/stage1_transformer.example.yaml configs/local/stage1_transform
 Local configs under `configs/local/` are ignored by git, except for `.gitkeep`.
 Config precedence is: dataclass defaults, then YAML values, then explicit CLI arguments.
 YAML files have `task` and `stage` sections. Use `task.eval_lengths` for length sweeps and
-`stage.device` for device selection. Supported device values are `auto`, `cpu`, and `cuda`.
+`stage.device` for device selection. Stage 0/1 use `stage.train_length`, while Stage 2A
+uses `stage.train_lengths`. Supported device values are `auto`, `cpu`, and `cuda`.
 
 ## Stage 0: Max-Pooling Baseline
 

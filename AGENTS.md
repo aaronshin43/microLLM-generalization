@@ -50,6 +50,7 @@ None yet — no `pyproject.toml`, `requirements.txt`, or test runner exists. Whe
 - Put local experiment configs in `infinite_generalization/configs/local/`; this directory is git-ignored except for `.gitkeep`.
 - Config precedence is: dataclass defaults, YAML config values, then explicit CLI arguments.
 - YAML configs use `task` and `stage` sections. `task.eval_lengths` controls length sweeps; `stage.device` supports `auto`, `cpu`, and `cuda`.
+- Stage 0/1 use `stage.train_length`; Stage 2A uses `stage.train_lengths`.
 
 ## Stage 0 Commands
 

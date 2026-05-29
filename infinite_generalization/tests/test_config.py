@@ -11,6 +11,7 @@ SRC = ROOT / "src"
 sys.path.insert(0, str(SRC))
 
 from config import (  # noqa: E402
+    Stage0Config,
     Stage1Config,
     Stage2AConfig,
     TaskConfig,
@@ -43,6 +44,15 @@ class ExperimentConfigTest(unittest.TestCase):
 
         self.assertEqual(config.device, "cpu")
         self.assertEqual(config.epochs, 3)
+
+    def test_stage0_train_length_lives_in_stage_config(self) -> None:
+        config = build_config(
+            Stage0Config,
+            yaml_values={"train_length": 20},
+            cli_values={"train_length": 30},
+        )
+
+        self.assertEqual(config.train_length, 30)
 
     def test_task_config_normalizes_yaml_eval_lengths_to_tuple(self) -> None:
         task = build_config(

@@ -45,7 +45,7 @@ class TokenPresenceDataTest(unittest.TestCase):
 
         inputs, labels = make_balanced_token_presence_dataset(
             num_examples=1_000,
-            length=task.train_length,
+            length=10,
             task=task,
             generator=generator,
         )
@@ -66,7 +66,7 @@ class TokenPresenceDataTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             make_balanced_token_presence_dataset(
                 num_examples=1,
-                length=task.train_length,
+                length=10,
                 task=task,
                 generator=generator,
             )
