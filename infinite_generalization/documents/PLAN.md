@@ -49,9 +49,7 @@ Reason:
 
 ## First Task
 
-The first task is defined in [`TASK.md`](TASK.md).
-
-Short version:
+The first task is token-presence detection:
 
 - input: a token sequence
 - output: binary label for whether a fixed target token appears anywhere
@@ -206,7 +204,6 @@ For the transformer, also track:
 ## Deliverables
 
 - `PLAN.md`
-- `TASK.md`
 - a small standalone PyTorch codebase for data generation, models, training, and evaluation
 - plots of accuracy vs length
 - qualitative attention visualizations for transformer runs

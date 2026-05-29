@@ -22,7 +22,7 @@ from data import (  # noqa: E402
 
 
 class TokenPresenceDataTest(unittest.TestCase):
-    """Validate the dataset invariants required by TASK.md."""
+    """Validate the dataset invariants for token-presence detection."""
 
     def test_non_target_sampler_excludes_target_token(self) -> None:
         task = TaskConfig()
