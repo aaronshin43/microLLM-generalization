@@ -78,7 +78,6 @@ class Stage2BTrainingComponentTest(unittest.TestCase):
             batch_size=32,
             eval_batch_size=32,
             attention_variant="target_key_log_bias",
-            output_dir="runs/stage2b_test",
         )
         device = torch.device("cpu")
         model = make_model(task=task, config=config, device=device)
