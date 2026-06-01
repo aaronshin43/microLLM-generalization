@@ -469,15 +469,11 @@ class LengthAwareSelfAttention(nn.Module):
         k = self._split_heads(k_full)
         v = self._split_heads(v_full)
         base_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        correction = self.correction_value(sequence_length, device=base_scores.device)
-        target_like: torch.Tensor | None = None
-        if self.attention_variant == "global_log_temperature":
-            corrected_scores = (1.0 + correction) * base_scores
-        else:
-            if self.target_detector is None:
-                raise RuntimeError("target_key_log_bias requires a target detector")
-            target_like = self.target_detector(k_full).squeeze(-1)
-            corrected_scores = base_scores + correction * target_like[:, None, None, :]
+        corrected_scores, correction, target_like = self.apply_length_correction(
+            base_scores=base_scores,
+            k_full=k_full,
+            sequence_length=sequence_length,
+        )
 
         attention_weights = torch.softmax(corrected_scores, dim=-1)
         dropped_attention = self.attention_dropout(attention_weights)
@@ -511,17 +507,17 @@ class LengthAwareSelfAttention(nn.Module):
         base_scores: torch.Tensor,
         k_full: torch.Tensor,
         sequence_length: int,
-    ) -> torch.Tensor:
-        """Apply the configured length-aware correction to attention logits."""
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Apply length-aware correction and return diagnostics needed for logging."""
 
         correction = self.correction_value(sequence_length, device=base_scores.device)
         if self.attention_variant == "global_log_temperature":
-            return (1.0 + correction) * base_scores
+            return (1.0 + correction) * base_scores, correction, None
 
         if self.target_detector is None:
             raise RuntimeError("target_key_log_bias requires a target detector")
         target_like = self.target_detector(k_full).squeeze(-1)
-        return base_scores + correction * target_like[:, None, None, :]
+        return base_scores + correction * target_like[:, None, None, :], correction, target_like
 
     @torch.no_grad()
     def target_detector_vocab_rows(
