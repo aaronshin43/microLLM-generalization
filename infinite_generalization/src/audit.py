@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from config import Stage0Config, Stage1Config, Stage2AConfig, TaskConfig
+from config import Stage0Config, Stage1Config, Stage2AConfig, Stage2BConfig, TaskConfig
 from data import make_balanced_token_presence_dataset
 
 
@@ -190,13 +190,13 @@ def save_multilength_audit_examples(
     model: nn.Module,
     *,
     task: TaskConfig,
-    config: Stage2AConfig,
+    config: Stage2AConfig | Stage2BConfig,
     device: torch.device,
     output_dir: Path,
     examples_per_class: int,
     preview_tokens: int,
 ) -> None:
-    """Save audit examples for Stage 2A multi-length train, validation, and test splits."""
+    """Save audit examples for multi-length train, validation, and test splits."""
 
     examples_dir = output_dir / "examples"
     examples_dir.mkdir(parents=True, exist_ok=True)

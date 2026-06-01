@@ -11,7 +11,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from config import Stage0Config, Stage1Config, Stage2AConfig, TaskConfig
+from config import Stage0Config, Stage1Config, Stage2AConfig, Stage2BConfig, TaskConfig
 from data import (
     diagnostic_slice_specs,
     make_balanced_token_presence_dataset,
@@ -203,7 +203,7 @@ def evaluate_by_length(
     model: nn.Module,
     *,
     task: TaskConfig,
-    config: Stage0Config | Stage1Config | Stage2AConfig,
+    config: Stage0Config | Stage1Config | Stage2AConfig | Stage2BConfig,
     device: torch.device,
 ) -> list[dict[str, float | int]]:
     """Evaluate the trained model on every required sequence length."""
@@ -252,7 +252,7 @@ def evaluate_diagnostic_slices_by_length(
     model: nn.Module,
     *,
     task: TaskConfig,
-    config: Stage0Config | Stage1Config | Stage2AConfig,
+    config: Stage0Config | Stage1Config | Stage2AConfig | Stage2BConfig,
     device: torch.device,
 ) -> list[dict[str, float | int | str]]:
     """Evaluate controlled diagnostic slices required by the research plan."""

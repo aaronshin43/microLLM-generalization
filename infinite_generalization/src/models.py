@@ -228,12 +228,53 @@ class LengthAwareTransformerTokenPresenceClassifier(nn.Module):
         logits = self.classifier(pooled).squeeze(-1)
         return logits, pooled, attention_weights
 
+    def forward_with_attention_details(
+        self,
+        tokens: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, list[torch.Tensor], list[dict[str, object]]]:
+        """Return logits, pooled activations, attention weights, and score diagnostics."""
+
+        hidden = self.embedding(tokens)
+        attention_weights: list[torch.Tensor] = []
+        attention_details: list[dict[str, object]] = []
+        for layer in self.layers:
+            hidden, weights, details = layer.forward_with_diagnostics(hidden)
+            attention_weights.append(weights)
+            attention_details.append(details)
+
+        pooled = hidden.max(dim=1).values
+        logits = self.classifier(pooled).squeeze(-1)
+        return logits, pooled, attention_weights, attention_details
+
     def length_scale_rows(self, lengths: tuple[int, ...]) -> list[dict[str, float | int | str]]:
         """Return learned length-scale values for audit logging."""
 
         rows: list[dict[str, float | int | str]] = []
         for layer_index, layer in enumerate(self.layers):
             rows.extend(layer.length_scale_rows(lengths=lengths, layer_index=layer_index))
+        return rows
+
+    @torch.no_grad()
+    def target_detector_vocab_rows(
+        self,
+        *,
+        vocab_size: int,
+        target_token: int,
+    ) -> list[dict[str, float | int | bool]]:
+        """Return target-key detector outputs for vocabulary embeddings."""
+
+        rows: list[dict[str, float | int | bool]] = []
+        token_ids = torch.arange(vocab_size, device=self.embedding.weight.device)
+        hidden = self.embedding(token_ids.unsqueeze(0))
+        for layer_index, layer in enumerate(self.layers):
+            rows.extend(
+                layer.target_detector_vocab_rows(
+                    hidden=hidden,
+                    token_ids=token_ids,
+                    target_token=target_token,
+                    layer_index=layer_index,
+                )
+            )
         return rows
 
 
@@ -286,6 +327,22 @@ class LengthAwareAttentionEncoderLayer(nn.Module):
         hidden = self.norm2(hidden + self.dropout2(feedforward_output))
         return hidden, attention_weights
 
+    def forward_with_diagnostics(
+        self,
+        hidden: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict[str, object]]:
+        """Run one encoder layer and return attention score diagnostics."""
+
+        attention_output, attention_weights, attention_details = self.self_attn(
+            hidden,
+            return_attention=True,
+            return_diagnostics=True,
+        )
+        hidden = self.norm1(hidden + self.dropout1(attention_output))
+        feedforward_output = self.linear2(self.dropout(self.activation(self.linear1(hidden))))
+        hidden = self.norm2(hidden + self.dropout2(feedforward_output))
+        return hidden, attention_weights, attention_details
+
     def length_scale_rows(
         self,
         *,
@@ -295,6 +352,24 @@ class LengthAwareAttentionEncoderLayer(nn.Module):
         """Return learned attention length-scale values for this layer."""
 
         return self.self_attn.length_scale_rows(lengths=lengths, layer_index=layer_index)
+
+    @torch.no_grad()
+    def target_detector_vocab_rows(
+        self,
+        *,
+        hidden: torch.Tensor,
+        token_ids: torch.Tensor,
+        target_token: int,
+        layer_index: int,
+    ) -> list[dict[str, float | int | bool]]:
+        """Return target-key detector outputs for this layer if available."""
+
+        return self.self_attn.target_detector_vocab_rows(
+            hidden=hidden,
+            token_ids=token_ids,
+            target_token=target_token,
+            layer_index=layer_index,
+        )
 
 
 class LengthAwareSelfAttention(nn.Module):
@@ -372,7 +447,12 @@ class LengthAwareSelfAttention(nn.Module):
         hidden: torch.Tensor,
         *,
         return_attention: bool,
-    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        return_diagnostics: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor | None] | tuple[
+        torch.Tensor,
+        torch.Tensor,
+        dict[str, object],
+    ]:
         """Apply length-aware self-attention.
 
         Returned attention weights have shape `(batch, heads, query, key)`.
@@ -389,11 +469,16 @@ class LengthAwareSelfAttention(nn.Module):
         k = self._split_heads(k_full)
         v = self._split_heads(v_full)
         base_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
-        corrected_scores = self.apply_length_correction(
-            base_scores=base_scores,
-            k_full=k_full,
-            sequence_length=sequence_length,
-        )
+        correction = self.correction_value(sequence_length, device=base_scores.device)
+        target_like: torch.Tensor | None = None
+        if self.attention_variant == "global_log_temperature":
+            corrected_scores = (1.0 + correction) * base_scores
+        else:
+            if self.target_detector is None:
+                raise RuntimeError("target_key_log_bias requires a target detector")
+            target_like = self.target_detector(k_full).squeeze(-1)
+            corrected_scores = base_scores + correction * target_like[:, None, None, :]
+
         attention_weights = torch.softmax(corrected_scores, dim=-1)
         dropped_attention = self.attention_dropout(attention_weights)
         context = torch.matmul(dropped_attention, v)
@@ -403,6 +488,19 @@ class LengthAwareSelfAttention(nn.Module):
             self.embed_dim,
         )
         output = self.out_proj(merged_context)
+        if return_diagnostics:
+            details: dict[str, object] = {
+                "attention_variant": self.attention_variant,
+                "base_scores": base_scores,
+                "corrected_scores": corrected_scores,
+                "length_correction": correction,
+                "target_like": target_like,
+            }
+            if self.attention_variant == "global_log_temperature":
+                details["alpha_length_scale"] = 1.0 + correction
+            else:
+                details["beta_length_scale"] = correction
+            return output, attention_weights, details
         if return_attention:
             return output, attention_weights
         return output, None
@@ -424,6 +522,40 @@ class LengthAwareSelfAttention(nn.Module):
             raise RuntimeError("target_key_log_bias requires a target detector")
         target_like = self.target_detector(k_full).squeeze(-1)
         return base_scores + correction * target_like[:, None, None, :]
+
+    @torch.no_grad()
+    def target_detector_vocab_rows(
+        self,
+        *,
+        hidden: torch.Tensor,
+        token_ids: torch.Tensor,
+        target_token: int,
+        layer_index: int,
+    ) -> list[dict[str, float | int | bool]]:
+        """Return target-like detector scores for vocabulary tokens."""
+
+        if self.target_detector is None:
+            return []
+
+        _, k_full, _ = F.linear(
+            hidden,
+            self.in_proj_weight,
+            self.in_proj_bias,
+        ).chunk(3, dim=-1)
+        target_like = self.target_detector(k_full).squeeze(0).squeeze(-1).detach().cpu()
+        token_ids_cpu = token_ids.detach().cpu()
+
+        rows: list[dict[str, float | int | bool]] = []
+        for token_id, score in zip(token_ids_cpu.tolist(), target_like.tolist()):
+            rows.append(
+                {
+                    "layer": layer_index,
+                    "token_id": int(token_id),
+                    "is_target": int(token_id) == target_token,
+                    "target_like_score": float(score),
+                }
+            )
+        return rows
 
     def _split_heads(self, values: torch.Tensor) -> torch.Tensor:
         """Convert `(batch, length, embed)` into `(batch, heads, length, head_dim)`."""

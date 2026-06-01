@@ -124,6 +124,33 @@ class TransformerModelTest(unittest.TestCase):
         self.assertEqual(rows[0]["attention_variant"], "target_key_log_bias")
         self.assertIn("beta_length_scale", rows[0])
 
+    def test_length_aware_model_returns_attention_score_details(self) -> None:
+        model = LengthAwareTransformerTokenPresenceClassifier(
+            vocab_size=16,
+            d_model=64,
+            num_heads=1,
+            num_layers=1,
+            dim_feedforward=128,
+            dropout=0.0,
+            attention_variant="target_key_log_bias",
+            log_scale_init=-5.0,
+            target_detector="linear",
+        )
+        tokens = torch.randint(0, 16, (2, 8))
+
+        logits, pooled, attention_layers, attention_details = model.forward_with_attention_details(
+            tokens
+        )
+        vocab_rows = model.target_detector_vocab_rows(vocab_size=16, target_token=1)
+
+        self.assertEqual(tuple(logits.shape), (2,))
+        self.assertEqual(tuple(pooled.shape), (2, 64))
+        self.assertEqual(tuple(attention_layers[0].shape), (2, 1, 8, 8))
+        self.assertEqual(tuple(attention_details[0]["base_scores"].shape), (2, 1, 8, 8))
+        self.assertEqual(tuple(attention_details[0]["corrected_scores"].shape), (2, 1, 8, 8))
+        self.assertEqual(len(vocab_rows), 16)
+        self.assertIn("target_like_score", vocab_rows[0])
+
 
 if __name__ == "__main__":
     unittest.main()
