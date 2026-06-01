@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from audit import select_audit_indices, target_positions
-from config import Stage1Config, Stage2AConfig, TaskConfig
+from config import Stage1Config, Stage2AConfig, Stage2BConfig, TaskConfig
 from data import (
     diagnostic_slice_specs,
     make_negative_dataset,
@@ -122,7 +122,7 @@ def save_attention_analysis(
     model: nn.Module,
     *,
     task: TaskConfig,
-    config: Stage1Config | Stage2AConfig,
+    config: Stage1Config | Stage2AConfig | Stage2BConfig,
     device: torch.device,
     output_dir: Path,
     examples_per_class: int,

@@ -122,7 +122,64 @@ class Stage2AConfig:
         return data
 
 
-ConfigT = TypeVar("ConfigT", TaskConfig, Stage0Config, Stage1Config, Stage2AConfig)
+@dataclass(frozen=True)
+class Stage2BConfig:
+    """Training configuration for length-aware attention interventions."""
+
+    seed: int = 1234
+    device: str = "auto"
+    train_lengths: tuple[int, ...] = (10,)
+    train_examples_per_length: int = 50_000
+    val_examples_per_length: int = 10_000
+    test_examples: int = 10_000
+    diagnostic_examples: int = 2_000
+    batch_size: int = 512
+    eval_batch_size: int = 32
+    epochs: int = 10
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.0
+    d_model: int = 64
+    num_heads: int = 1
+    num_layers: int = 1
+    dim_feedforward: int = 128
+    dropout: float = 0.0
+    attention_variant: str = "global_log_temperature"
+    log_length_mode: str = "log1p_length"
+    log_scale_init: float = -5.0
+    target_detector: str = "linear"
+    output_dir: str = "runs/stage2b_global_log_temperature"
+
+    def __post_init__(self) -> None:
+        """Normalize sequence-like config values loaded from YAML."""
+
+        object.__setattr__(self, "train_lengths", tuple(self.train_lengths))
+        if not self.train_lengths:
+            raise ValueError("train_lengths must contain at least one length")
+        if self.attention_variant not in {"global_log_temperature", "target_key_log_bias"}:
+            raise ValueError(
+                "attention_variant must be one of: global_log_temperature, target_key_log_bias"
+            )
+        if self.log_length_mode != "log1p_length":
+            raise ValueError("log_length_mode must be: log1p_length")
+        if self.target_detector != "linear":
+            raise ValueError("target_detector must be: linear")
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable representation of the training config."""
+
+        data = asdict(self)
+        data["train_lengths"] = list(self.train_lengths)
+        return data
+
+
+ConfigT = TypeVar(
+    "ConfigT",
+    TaskConfig,
+    Stage0Config,
+    Stage1Config,
+    Stage2AConfig,
+    Stage2BConfig,
+)
 
 
 def load_yaml_config(path: str | None) -> dict[str, Any]:

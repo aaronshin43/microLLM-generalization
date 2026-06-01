@@ -14,6 +14,7 @@ from config import (  # noqa: E402
     Stage0Config,
     Stage1Config,
     Stage2AConfig,
+    Stage2BConfig,
     TaskConfig,
     build_config,
     resolve_device,
@@ -71,6 +72,27 @@ class ExperimentConfigTest(unittest.TestCase):
         )
 
         self.assertEqual(config.train_lengths, (10, 20, 50, 100))
+
+    def test_stage2b_config_normalizes_yaml_train_lengths_to_tuple(self) -> None:
+        config = build_config(
+            Stage2BConfig,
+            yaml_values={
+                "train_lengths": [10, 20, 50, 100],
+                "attention_variant": "target_key_log_bias",
+            },
+            cli_values={},
+        )
+
+        self.assertEqual(config.train_lengths, (10, 20, 50, 100))
+        self.assertEqual(config.attention_variant, "target_key_log_bias")
+
+    def test_stage2b_config_rejects_unknown_attention_variant(self) -> None:
+        with self.assertRaises(ValueError):
+            build_config(
+                Stage2BConfig,
+                yaml_values={"attention_variant": "unknown"},
+                cli_values={},
+            )
 
     def test_resolve_device_accepts_cpu(self) -> None:
         self.assertEqual(resolve_device("cpu").type, "cpu")
