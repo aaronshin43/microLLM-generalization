@@ -14,77 +14,77 @@ The goal is not to reproduce every internal activation of the trained transforme
 
 We model the final classifier logit as the sum of three terms:
 
-$$
-\operatorname{final\_logit}(\operatorname{sequence\_length})
+```math
+\mathrm{final\_logit}(\mathrm{sequence\_length})
 \approx
-\operatorname{classifier\_bias}
+\mathrm{classifier\_bias}
 +
-\operatorname{target\_signal\_contribution}(\operatorname{sequence\_length})
+\mathrm{target\_signal\_contribution}(\mathrm{sequence\_length})
 -
-\operatorname{non\_target\_interference\_contribution}(\operatorname{sequence\_length})
-$$
+\mathrm{non\_target\_interference\_contribution}(\mathrm{sequence\_length})
+```
 
 The intended interpretation is:
 
-$$
-\operatorname{target\_signal\_contribution}(\operatorname{sequence\_length})
+```math
+\mathrm{target\_signal\_contribution}(\mathrm{sequence\_length})
 \text{ decreases or saturates as length grows}
-$$
+```
 
 while:
 
-$$
-\operatorname{non\_target\_interference\_contribution}(\operatorname{sequence\_length})
+```math
+\mathrm{non\_target\_interference\_contribution}(\mathrm{sequence\_length})
 \text{ increases as length grows}
-$$
+```
 
 The Stage 1 model fails when:
 
-$$
-\operatorname{final\_logit}(\operatorname{sequence\_length}) < 0
-$$
+```math
+\mathrm{final\_logit}(\mathrm{sequence\_length}) < 0
+```
 
 because the binary decision rule is:
 
-$$
-\operatorname{prediction}
+```math
+\mathrm{prediction}
 =
 \begin{cases}
-\operatorname{positive}, & \operatorname{final\_logit} \ge 0 \\
-\operatorname{negative}, & \operatorname{final\_logit} < 0
+\mathrm{positive}, & \mathrm{final\_logit} \ge 0 \\
+\mathrm{negative}, & \mathrm{final\_logit} < 0
 \end{cases}
-$$
+```
 
 ## Target Attention Mass
 
 For one query position, define:
 
-$$
-\operatorname{target\_attention\_score}
-$$
+```math
+\mathrm{target\_attention\_score}
+```
 
 as the attention score assigned to the target key, and define:
 
-$$
-\operatorname{expected\_non\_target\_exp\_score}
-$$
+```math
+\mathrm{expected\_non\_target\_exp\_score}
+```
 
 as the average exponentiated attention score assigned to non-target keys.
 
 The approximate attention mass on the target key is:
 
-$$
-\operatorname{target\_attention\_mass}(\operatorname{sequence\_length})
+```math
+\mathrm{target\_attention\_mass}(\mathrm{sequence\_length})
 =
 \frac{
-\exp(\operatorname{target\_attention\_score})
+\exp(\mathrm{target\_attention\_score})
 }{
-\exp(\operatorname{target\_attention\_score})
+\exp(\mathrm{target\_attention\_score})
 +
-(\operatorname{sequence\_length} - 1)
-\operatorname{expected\_non\_target\_exp\_score}
+(\mathrm{sequence\_length} - 1)
+\mathrm{expected\_non\_target\_exp\_score}
 }
-$$
+```
 
 This formula captures the softmax denominator effect. The target numerator may remain large, but the denominator grows as more non-target keys are added.
 
@@ -92,28 +92,28 @@ This formula captures the softmax denominator effect. The target numerator may r
 
 Define the fixed target score margin:
 
-$$
-\operatorname{target\_score\_margin}
+```math
+\mathrm{target\_score\_margin}
 =
-\operatorname{target\_attention\_score}
+\mathrm{target\_attention\_score}
 -
-\log(\operatorname{expected\_non\_target\_exp\_score})
-$$
+\log(\mathrm{expected\_non\_target\_exp\_score})
+```
 
 Then the target attention mass can be rewritten as:
 
-$$
-\operatorname{target\_attention\_mass}(\operatorname{sequence\_length})
+```math
+\mathrm{target\_attention\_mass}(\mathrm{sequence\_length})
 =
 \frac{
 1
 }{
 1
 +
-(\operatorname{sequence\_length} - 1)
-\exp(-\operatorname{target\_score\_margin})
+(\mathrm{sequence\_length} - 1)
+\exp(-\mathrm{target\_score\_margin})
 }
-$$
+```
 
 This is the core length-scaling formula. If `target_score_margin` is fixed, then `target_attention_mass` decreases as `sequence_length` increases.
 
@@ -123,23 +123,23 @@ To keep the target attention mass roughly constant as length grows, the target s
 
 A rough condition is:
 
-$$
-\operatorname{target\_score\_margin}
+```math
+\mathrm{target\_score\_margin}
 \gtrsim
-\log(\operatorname{sequence\_length})
-$$
+\log(\mathrm{sequence\_length})
+```
 
 For example:
 
-$$
+```math
 \log(10) \approx 2.3
-$$
+```
 
 while:
 
-$$
+```math
 \log(1000) \approx 6.9
-$$
+```
 
 Therefore, a margin that is sufficient for length 10 can be insufficient for length 1000.
 
@@ -151,43 +151,43 @@ Attention dilution alone does not fully describe the final classifier output, be
 
 The reduced logit model is:
 
-$$
-\operatorname{final\_logit}(\operatorname{sequence\_length})
+```math
+\mathrm{final\_logit}(\mathrm{sequence\_length})
 \approx
-\operatorname{classifier\_bias}
+\mathrm{classifier\_bias}
 +
-\operatorname{target\_signal\_strength}
+\mathrm{target\_signal\_strength}
 \cdot
-\operatorname{target\_attention\_mass}(\operatorname{sequence\_length})
+\mathrm{target\_attention\_mass}(\mathrm{sequence\_length})
 -
-\operatorname{non\_target\_interference\_strength}
+\mathrm{non\_target\_interference\_strength}
 \cdot
-\operatorname{non\_target\_interference\_growth}(\operatorname{sequence\_length})
-$$
+\mathrm{non\_target\_interference\_growth}(\mathrm{sequence\_length})
+```
 
 The terms are:
 
-$$
-\operatorname{classifier\_bias}
-$$
+```math
+\mathrm{classifier\_bias}
+```
 
 the bias term of the final linear classifier;
 
-$$
-\operatorname{target\_signal\_strength}
-$$
+```math
+\mathrm{target\_signal\_strength}
+```
 
 the conversion strength from target attention mass into positive classifier evidence;
 
-$$
-\operatorname{non\_target\_interference\_strength}
-$$
+```math
+\mathrm{non\_target\_interference\_strength}
+```
 
 the strength with which non-target positions push the classifier logit downward;
 
-$$
-\operatorname{non\_target\_interference\_growth}(\operatorname{sequence\_length})
-$$
+```math
+\mathrm{non\_target\_interference\_growth}(\mathrm{sequence\_length})
+```
 
 the length-dependent growth of non-target interference.
 
@@ -197,19 +197,19 @@ The empirical analysis showed that target-sourced max-pool contribution stays re
 
 One simple candidate is logarithmic growth:
 
-$$
-\operatorname{non\_target\_interference\_growth}(\operatorname{sequence\_length})
+```math
+\mathrm{non\_target\_interference\_growth}(\mathrm{sequence\_length})
 =
-\log(\operatorname{sequence\_length})
-$$
+\log(\mathrm{sequence\_length})
+```
 
 Another candidate comes from the intuition that max pooling over many non-target positions creates an extreme-value effect:
 
-$$
-\operatorname{non\_target\_interference\_growth}(\operatorname{sequence\_length})
+```math
+\mathrm{non\_target\_interference\_growth}(\mathrm{sequence\_length})
 =
-\sqrt{2\log(\operatorname{sequence\_length})}
-$$
+\sqrt{2\log(\mathrm{sequence\_length})}
+```
 
 Both should be treated as candidate reduced models. The next step is to fit each candidate to the empirical length sweep and compare predicted logits against observed logits.
 
@@ -217,91 +217,91 @@ Both should be treated as candidate reduced models. The next step is to fit each
 
 The complete candidate model is:
 
-$$
-\operatorname{target\_attention\_mass}(\operatorname{sequence\_length})
+```math
+\mathrm{target\_attention\_mass}(\mathrm{sequence\_length})
 =
 \frac{
 1
 }{
 1
 +
-(\operatorname{sequence\_length} - 1)
-\exp(-\operatorname{target\_score\_margin})
+(\mathrm{sequence\_length} - 1)
+\exp(-\mathrm{target\_score\_margin})
 }
-$$
+```
 
 and:
 
-$$
-\operatorname{final\_logit}(\operatorname{sequence\_length})
+```math
+\mathrm{final\_logit}(\mathrm{sequence\_length})
 \approx
-\operatorname{classifier\_bias}
+\mathrm{classifier\_bias}
 +
-\operatorname{target\_signal\_strength}
+\mathrm{target\_signal\_strength}
 \cdot
-\operatorname{target\_attention\_mass}(\operatorname{sequence\_length})
+\mathrm{target\_attention\_mass}(\mathrm{sequence\_length})
 -
-\operatorname{non\_target\_interference\_strength}
+\mathrm{non\_target\_interference\_strength}
 \cdot
-\operatorname{non\_target\_interference\_growth}(\operatorname{sequence\_length})
-$$
+\mathrm{non\_target\_interference\_growth}(\mathrm{sequence\_length})
+```
 
 The main fitted parameters are:
 
-$$
-\operatorname{target\_score\_margin}
-$$
+```math
+\mathrm{target\_score\_margin}
+```
 
-$$
-\operatorname{target\_signal\_strength}
-$$
+```math
+\mathrm{target\_signal\_strength}
+```
 
-$$
-\operatorname{non\_target\_interference\_strength}
-$$
+```math
+\mathrm{non\_target\_interference\_strength}
+```
 
-$$
-\operatorname{classifier\_bias}
-$$
+```math
+\mathrm{classifier\_bias}
+```
 
 The main model-selection choice is:
 
-$$
-\operatorname{non\_target\_interference\_growth}(\operatorname{sequence\_length})
+```math
+\mathrm{non\_target\_interference\_growth}(\mathrm{sequence\_length})
 \in
 \left\{
-\log(\operatorname{sequence\_length}),
-\sqrt{2\log(\operatorname{sequence\_length})}
+\log(\mathrm{sequence\_length}),
+\sqrt{2\log(\mathrm{sequence\_length})}
 \right\}
-$$
+```
 
 ## Interpretation
 
 This reduced model explains the empirical failure as:
 
-$$
-\operatorname{sequence\_length} \uparrow
+```math
+\mathrm{sequence\_length} \uparrow
 \quad\Rightarrow\quad
-\operatorname{softmax\_denominator} \uparrow
+\mathrm{softmax\_denominator} \uparrow
 \quad\Rightarrow\quad
-\operatorname{target\_attention\_mass} \downarrow
-$$
+\mathrm{target\_attention\_mass} \downarrow
+```
 
 and:
 
-$$
-\operatorname{sequence\_length} \uparrow
+```math
+\mathrm{sequence\_length} \uparrow
 \quad\Rightarrow\quad
-\operatorname{non\_target\_interference\_growth} \uparrow
+\mathrm{non\_target\_interference\_growth} \uparrow
 \quad\Rightarrow\quad
-\operatorname{negative\_classifier\_contribution} \uparrow
-$$
+\mathrm{negative\_classifier\_contribution} \uparrow
+```
 
 Together:
 
-$$
-\operatorname{final\_logit}(\operatorname{sequence\_length}) \downarrow
-$$
+```math
+\mathrm{final\_logit}(\mathrm{sequence\_length}) \downarrow
+```
 
 The Stage 1 transformer therefore appears to learn a finite-margin target-detection mechanism rather than a true length-invariant existential algorithm.
 
@@ -324,18 +324,18 @@ The evaluated lengths were:
 
 The target attention curve is well explained by the fixed-margin softmax dilution formula:
 
-$$
-\operatorname{target\_attention\_mass}(\operatorname{sequence\_length})
+```math
+\mathrm{target\_attention\_mass}(\mathrm{sequence\_length})
 =
 \frac{
 1
 }{
 1
 +
-(\operatorname{sequence\_length} - 1)
-\exp(-\operatorname{target\_score\_margin})
+(\mathrm{sequence\_length} - 1)
+\exp(-\mathrm{target\_score\_margin})
 }
-$$
+```
 
 Fit result:
 
@@ -350,31 +350,31 @@ Fit result:
 
 This supports the fixed-margin interpretation. The learned effective margin is enough for short sequences, but it is smaller than the rough margin needed at long lengths:
 
-$$
+```math
 \log(1000) \approx 6.91
-$$
+```
 
-$$
+```math
 \log(10000) \approx 9.21
-$$
+```
 
 ### Final Logit Fit
 
 The best reduced logit formula was:
 
-$$
-\operatorname{final\_logit}(\operatorname{sequence\_length})
+```math
+\mathrm{final\_logit}(\mathrm{sequence\_length})
 \approx
 7.2765
 +
 6.8618
 \cdot
-\operatorname{observed\_target\_attention\_mass}(\operatorname{sequence\_length})
+\mathrm{observed\_target\_attention\_mass}(\mathrm{sequence\_length})
 -
 1.4136
 \cdot
-\log(\operatorname{sequence\_length})
-$$
+\log(\mathrm{sequence\_length})
+```
 
 Fit result:
 
@@ -392,23 +392,23 @@ This means that target attention decay alone is not the full explanation. The fi
 
 The measured non-target-sourced max-pool contribution is also well fit by a logarithmic length penalty:
 
-$$
-\operatorname{non\_target\_sourced\_contribution}(\operatorname{sequence\_length})
+```math
+\mathrm{non\_target\_sourced\_contribution}(\mathrm{sequence\_length})
 \approx
 13.2757
 -
 2.2212
 \cdot
-\log(\operatorname{sequence\_length})
-$$
+\log(\mathrm{sequence\_length})
+```
 
 Fit result:
 
 | Model | R-squared | RMSE |
 |---|---:|---:|
 | non-target constant | 0.0000 | 3.7056 |
-| non-target \( \log(\operatorname{sequence\_length}) \) | 0.9579 | 0.7606 |
-| non-target \( \sqrt{2\log(\operatorname{sequence\_length})} \) | 0.9174 | 1.0648 |
+| non-target log(sequence_length) | 0.9579 | 0.7606 |
+| non-target sqrt(2 log(sequence_length)) | 0.9174 | 1.0648 |
 
 <img src="figures/maxpool_non_target_contribution_fit.png" alt="Non-target max-pool contribution fit" width="560">
 
@@ -439,16 +439,16 @@ The extended fit supports the reduced explanation:
 
 More concretely:
 
-$$
-\operatorname{target\_attention\_mass}
+```math
+\mathrm{target\_attention\_mass}
 \text{ is explained by fixed-margin softmax dilution}
-$$
+```
 
 and:
 
-$$
-\operatorname{final\_logit}
+```math
+\mathrm{final\_logit}
 \text{ is explained by target evidence minus a logarithmic non-target max-pool penalty}
-$$
+```
 
 This is a close quantitative reproduction of the empirical Stage 1 failure curve, although it remains a reduced model rather than a full exact model of every transformer activation.
