@@ -1,460 +1,364 @@
-# Stage 2B Task: Length-Aware Attention Interventions
+# Task: Simplified Length-Aware Attention Model
 
 ## Objective
 
-Test whether the Stage 1 transformer's long-length failure can be mitigated by adding a learned length-dependent correction to attention.
+Analyze the professor's simplified length-aware attention model and connect it to our Stage 1 and Stage 2B results.
 
-The motivating question is:
+This task is not about training a new model. The goal is to write a clean theoretical note, add a small visualization, and use the result as groundwork for a future technical report.
 
-> If target attention needs roughly a `log(n)`-scale score advantage to remain dominant as sequence length `n` grows, can the model learn a `k log(n)` correction at an appropriate place in the network?
+## Simplified Setup
 
-Run two intervention families:
+Use a vocabulary with two tokens:
 
-1. global learned `log(n)` attention temperature
-2. learned target-key `log(n)` attention bias
+- `t`: target token
+- `u`: non-target token
 
-The goal is not only to improve accuracy. The goal is to determine whether the Stage 1 failure mechanism is actually caused by finite attention-score margins and softmax denominator growth.
-
-## Background
-
-For a query row, attention to the target key is:
+For sequence length `n`, assume the input is:
 
 ```text
-target_mass = exp(score_target) / sum_j exp(score_j)
+t, u, u, ..., u
 ```
 
-As sequence length grows, the denominator receives more non-target terms. If the target score margin stays finite, the target mass can decay even when `score_target` remains high.
+Use two-dimensional embeddings:
 
-To keep target attention mass stable under longer lengths, the target score advantage must roughly compensate for the growing number of competing keys:
-
-```text
-target_score - typical_non_target_score ~= log(n)
+```math
+t \mapsto [1, 0],
+\qquad
+u \mapsto [0, 1].
 ```
 
-Stage 1 was trained only at length 10, so the model had little pressure to create a margin large enough for lengths such as 500, 1000, or 10000.
+The embedded input matrix is:
 
-## Core Hypotheses
-
-### Hypothesis A: Global Log-Temperature Can Help If The Target Is Already The Top Key
-
-Scale all attention logits by a learned length-dependent multiplier:
-
-```text
-base_score(i, j) = q_i dot k_j / sqrt(d_head)
-alpha(n) = 1 + softplus(k) * log(n)
-score(i, j) = alpha(n) * base_score(i, j)
+```math
+X_n =
+\begin{bmatrix}
+1 & 0 \\
+0 & 1 \\
+0 & 1 \\
+\vdots & \vdots \\
+0 & 1
+\end{bmatrix}.
 ```
 
-Expected behavior:
+Assume the final classifier uses only the last token output. For the last query row, assume the attention score vector is:
 
-- if the target key usually has the highest base score, larger `alpha(n)` should sharpen attention onto the target at long lengths
-- target attention mass should decay less quickly with length
-- exactly-one positive accuracy should improve at long lengths
-
-Main risk:
-
-- this scales every score gap, not just target-vs-non-target gaps
-- if a non-target key has the highest base score, the multiplier can make attention more confidently wrong
-- if `k` grows too large, attention may become brittle or numerically saturated
-
-### Hypothesis B: Target-Key Log Bias Is More Direct But More Task-Specific
-
-Add a learned key-dependent bias that grows with `log(n)`:
-
-```text
-base_score(i, j) = q_i dot k_j / sqrt(d_head)
-target_like_j = detector(key_representation_j)
-beta(n) = softplus(k_bias) * log(n)
-score(i, j) = base_score(i, j) + beta(n) * target_like_j
+```math
+S_n = (a, b, b, \ldots, b),
+\qquad
+a > b.
 ```
 
-`target_like_j` must be learned from model representations. It must not use the true target mask or label.
+The target key has fixed score margin:
 
-Expected behavior:
-
-- if the model learns a reliable target-key detector, the target key receives an explicit length-scaled boost
-- target attention mass should remain more stable than in Stage 1
-- long exactly-one positive logits should stop drifting below zero
-
-Main risk:
-
-- this introduces a stronger task-specific inductive bias than a standard transformer
-- if the detector assigns high bias to non-target tokens, long-length behavior can still fail
-- negative examples may become false positives if the detector is poorly calibrated
-
-## Important Training Caveat
-
-If the correction is parameterized as:
-
-```text
-alpha(n) = 1 + softplus(k) * log(n / train_length)
+```math
+\Delta = a - b > 0.
 ```
 
-then `alpha(10) = 1` for length-10 training, and `k` receives no useful gradient under fixed length-10 training. Do not use this as the primary parameterization unless training includes multiple lengths.
+Apply an inverse temperature schedule before softmax:
 
-For the primary length-10-only intervention, use a parameterization where `k` affects length 10 as well:
-
-```text
-1 + softplus(k) * log(n)
+```math
+\operatorname{softmax}(\alpha(n) S_n).
 ```
 
-or:
+After multiplying by `X_n`, the last-token attention output is:
 
-```text
-1 + softplus(k) * log1p(n)
+```math
+(p_t(n), 1 - p_t(n)).
 ```
 
-Use careful initialization so the initial model is close to the Stage 1 transformer.
+The target attention mass is:
 
-Recommended initialization:
-
-```text
-k_init = -5.0
-softplus(k_init) ~= 0.0067
+```math
+p_t(n)
+=
+\frac{\exp(\alpha(n)a)}
+{\exp(\alpha(n)a) + (n-1)\exp(\alpha(n)b)}
+=
+\frac{\exp(\alpha(n)\Delta)}
+{\exp(\alpha(n)\Delta) + (n-1)}.
 ```
 
-This gives a small initial correction while still allowing gradients at length 10.
+Important correction:
 
-## Model Variants
+The output cannot converge to `(1, 1)`. It is a convex combination of `[1, 0]` and `[0, 1]`, so the two coordinates always sum to 1.
 
-Keep the Stage 1 transformer backbone as close as possible:
+## Required Analysis
 
-- 1 transformer encoder layer
-- 1 attention head initially
-- `d_model = 64`
-- no positional encoding
-- max pooling
-- binary classifier
-- train length 10 for the primary experiment
+### 1. Constant Temperature
 
-Implement these variants:
+For:
 
-### Variant 0: Stage 1 Baseline
-
-Original attention:
-
-```text
-score(i, j) = q_i dot k_j / sqrt(d_head)
+```math
+\alpha(n) = \alpha_0,
 ```
 
-Purpose:
+derive:
 
-- reference point for accuracy, target attention decay, max-pool contribution drift, and positive logit collapse
-
-### Variant 1: Global Log-Temperature Attention
-
-Attention logits:
-
-```text
-score(i, j) = alpha(n) * q_i dot k_j / sqrt(d_head)
-alpha(n) = 1 + softplus(k_temperature) * log1p(n)
+```math
+p_t(n)
+=
+\frac{\exp(\alpha_0 \Delta)}
+{\exp(\alpha_0 \Delta) + (n-1)}
+\to 0
+\qquad
+\text{as } n \to \infty.
 ```
 
-Track:
+Interpretation:
 
-- learned `k_temperature`
-- `alpha(n)` for every evaluation length
-- attention entropy by length
-- target attention mass by length
-- long-length positive and negative accuracy
+A fixed target-vs-non-target score advantage is eventually diluted by the growing number of non-target keys.
 
-### Variant 2: Target-Key Log-Bias Attention
+### 2. Log Temperature
 
-Attention logits:
+For:
 
-```text
-target_like_j = detector(k_j)
-score(i, j) = q_i dot k_j / sqrt(d_head) + beta(n) * target_like_j
-beta(n) = softplus(k_bias) * log1p(n)
+```math
+\alpha(n) = \log n,
 ```
 
-Possible detector:
+derive:
 
-```text
-target_like_j = linear(k_j)
+```math
+p_t(n)
+=
+\frac{n^\Delta}
+{n^\Delta + n - 1}.
 ```
 
-or:
+Then show:
 
-```text
-target_like_j = MLP(k_j)
+```math
+\Delta > 1 \Rightarrow p_t(n) \to 1,
+\qquad
+\Delta = 1 \Rightarrow p_t(n) \to \frac{1}{2},
+\qquad
+0 < \Delta < 1 \Rightarrow p_t(n) \to 0.
 ```
 
-Start with a single linear detector to keep the interpretation simple.
+Interpretation:
 
-Track:
+A `log(n)` correction is sufficient only when the score margin is large enough.
 
-- learned `k_bias`
-- `beta(n)` for every evaluation length
-- `target_like_j` for target and non-target vocabulary tokens
-- whether target-like scores separate the target token from non-target tokens
-- target attention mass by length
-- long-length positive and negative accuracy
+### 3. Scaled Log Temperature
 
-## Training Conditions
+For:
 
-Run each intervention under two training conditions.
-
-### Condition A: Fixed Length 10
-
-Train only on length 10, matching Stage 1.
-
-Purpose:
-
-- test whether the architecture alone can learn a useful length-aware correction from the original training distribution
-- this is the strictest comparison to Stage 1
-
-Expected difficulty:
-
-- the model may not learn the correct extrapolating value of `k` from length 10 alone
-- if this fails, it does not fully refute the intervention; it may indicate insufficient training signal
-
-### Condition B: Short Multi-Length Calibration
-
-Train on:
-
-```text
-[10, 20, 50, 100]
+```math
+\alpha(n) = c \log n,
 ```
 
-Purpose:
+derive:
 
-- test whether a small amount of length variation lets the model learn a better length-scaling correction
-- compare against Stage 2A to see whether the improvement comes from multi-length training alone or from the length-aware attention mechanism
-
-This condition should use the same data-loader strategy as Stage 2A: single-length batches, alternating across length-specific loaders, no padding, and no masks.
-
-## Evaluation
-
-Evaluate every run on the same primary and diagnostic slices used in previous stages.
-
-Required lengths:
-
-```text
-10, 20, 50, 100, 200, 500, 700, 900, 1000, 1500, 2000, 5000, 10000
+```math
+p_t(n)
+=
+\frac{n^{c\Delta}}
+{n^{c\Delta} + n - 1}.
 ```
 
-Required diagnostic slices:
+Then show:
 
-- positive exactly one target
-- positive multi-target `k=2`
-- positive multi-target `k=3`
-- positive multi-target `k=5`
-- positive target near beginning
-- positive target near middle
-- positive target near end
-- negative no target
-
-Primary metrics:
-
-- accuracy by diagnostic slice and length
-- positive exactly-one accuracy by length
-- negative accuracy by length
-- mean positive logit by length
-- mean negative logit by length
-- logit margin:
-
-```text
-mean_positive_logit - mean_negative_logit
+```math
+c\Delta > 1 \Rightarrow p_t(n) \to 1,
+\qquad
+c\Delta = 1 \Rightarrow p_t(n) \to \frac{1}{2},
+\qquad
+c\Delta < 1 \Rightarrow p_t(n) \to 0.
 ```
 
-Mechanistic metrics:
+Interpretation:
 
-- learned length multiplier values: `alpha(n)` or `beta(n)`
-- attention entropy by length
-- target attention mean and max by length
-- softmax denominator mean by length
-- target score mean and target score rank by length
-- pooled activation norms by length
-- max-pool target-sourced vs non-target-sourced contribution
-- final logit decomposition by length
+The coefficient matters. A learned log correction can still fail if the effective product `c Delta` is too small.
 
-## Success Criteria
+### 4. General Condition
 
-A length-aware attention intervention is useful if it satisfies all of the following:
+Show that target attention converges to 1 if:
 
-- exactly-one positive accuracy remains high at lengths where Stage 1 fails
-- negative accuracy remains high, so the model is not solving the task by predicting positive too often
-- target attention mass decays less than in Stage 1
-- positive logits do not drift below zero at long lengths
-- the improvement is visible on sparse exactly-one positives, not only on multi-target positives
-- the learned `k` parameter is non-trivial and contributes to the length-dependent behavior
-
-The strongest result would be:
-
-```text
-Stage 1 fails at long exactly-one positives,
-Stage 2A improves but still has some degradation,
-log-aware attention further stabilizes target attention and logits.
+```math
+\alpha(n)\Delta - \log n \to +\infty.
 ```
 
-## Failure Criteria
+Show that target attention converges to 0 if:
 
-The intervention should be considered unsuccessful if:
-
-- long exactly-one positives still collapse below zero
-- negative examples become false positives at long lengths
-- attention sharpens onto the wrong non-target key
-- learned `k` remains effectively zero
-- performance improves only because multi-target positives are easy
-- the model becomes numerically unstable or produces NaNs at long lengths
-
-## Implementation Plan
-
-### Step 1: Add Length-Aware Attention Layers
-
-Add model components that can compute attention logits manually instead of relying entirely on `nn.MultiheadAttention`.
-
-Required behavior:
-
-- support `batch_first=True`
-- return attention weights for audit
-- support one head first
-- keep output projection, residual connections, layer norms, and feedforward block matching Stage 1
-- expose learned length-scaling parameters for logging
-
-Recommended files:
-
-```text
-src/models.py
-src/attention.py
+```math
+\alpha(n)\Delta - \log n \to -\infty.
 ```
 
-### Step 2: Add Configs
+Interpretation:
 
-Add a Stage 2B config with fields such as:
+The scaled target margin must outgrow the logarithm of the number of competing non-target keys.
 
-```text
-attention_variant: "global_log_temperature" | "target_key_log_bias"
-log_length_mode: "log1p_length"
-log_scale_init: -5.0
-target_detector: "linear"
-train_lengths: optional tuple for multi-length condition
+## Connection To Existing Results
+
+### Stage 1
+
+Connect the simplified model to the Stage 1 failure:
+
+- Stage 1 learned a fixed target-vs-non-target attention margin.
+- As length increases, the softmax denominator grows with the number of non-target tokens.
+- Target attention mass decreases even when the target score remains larger than each individual non-target score.
+- This explains why exactly-one positive examples are eventually classified as negative.
+
+### Stage 2B: Global Log-Temperature
+
+Connect the simplified model to the global log-temperature intervention:
+
+```math
+\tilde{s}_{ij} = \alpha(n)s_{ij}.
 ```
 
-Add example YAML configs:
+The simplified model predicts that this can work only if the learned effective margin satisfies a condition like:
 
-```text
-configs/stage2b_global_log_temperature.yaml
-configs/stage2b_target_key_log_bias.yaml
-configs/stage2b_global_log_temperature_multilength.yaml
-configs/stage2b_target_key_log_bias_multilength.yaml
+```math
+c\Delta > 1
 ```
 
-### Step 3: Add Training Script
+for a schedule comparable to `c log n`.
+
+Expected interpretation:
+
+- Global temperature is not automatically enough.
+- If the learned scale is too weak, the model still suffers attention dilution.
+- This matches our observed global log-temperature failure.
+
+### Stage 2B: Target-Key Log-Bias
+
+Connect the simplified model to the target-key bias intervention:
+
+```math
+\tilde{s}_{ij} = s_{ij} + \beta(n)r_j.
+```
+
+The effective target-vs-non-target margin becomes approximately:
+
+```math
+\Delta_{\mathrm{eff}}(n)
+=
+\Delta_{\mathrm{base}}
++
+\beta(n)(r_t - r_u).
+```
+
+Expected interpretation:
+
+- Target-key bias helps because it increases the target-specific margin instead of globally scaling all scores.
+- Multi-length training may help learn a better-calibrated target detector.
+- This explains why `target_key_log_bias_multilength` worked better than global log-temperature.
+
+### Finite Success Is Not Infinite Success
+
+The simplified model should also explain why success through length 10000 is not a proof of infinite-length generalization:
+
+- `target_attention_mean` can still decrease with length.
+- positive logits can still decrease with length.
+- attention entropy can still increase with length.
+- the effective margin condition may fail at longer lengths.
+
+## Deliverables
+
+### 1. Theoretical Note
 
 Create:
 
 ```text
-src/stage2b_length_aware_attention.py
+infinite_generalization/documents/SIMPLIFIED_LENGTH_AWARE_ATTENTION_MODEL.md
 ```
 
-It should support:
+The note should include:
 
-- fixed length-10 training
-- multi-length calibration training
-- diagnostic slices
-- audit CSV examples
-- attention summaries
-- learned length-scale logging
-- checkpoint and config metadata
+- the simplified two-token setup
+- the derivation of `p_t(n)`
+- constant-temperature behavior
+- `log(n)` temperature behavior
+- `c log(n)` temperature behavior
+- the general condition `alpha(n) Delta - log n -> +infinity`
+- the convex-combination correction
+- the connection to Stage 1 and Stage 2B
 
-Recommended output directories:
+Use the explanatory style of:
 
 ```text
-runs/stage2b_global_log_temperature
-runs/stage2b_target_key_log_bias
-runs/stage2b_global_log_temperature_multilength
-runs/stage2b_target_key_log_bias_multilength
+infinite_generalization/documents/THEORETICAL_MODEL.md
 ```
 
-### Step 4: Extend Attention Analysis
+### 2. Visualization Script Or Notebook
 
-Update attention summaries to include:
+Add a small self-contained visualization.
 
-- `attention_variant`
-- `alpha_length_scale` or `beta_length_scale`
-- raw base attention score statistics
-- corrected attention score statistics
-- target-like detector statistics for the target-key bias variant
-
-For target-key bias, record vocabulary-level detector outputs:
+Preferred script:
 
 ```text
-token_id, is_target, target_like_score
+infinite_generalization/src/plot_simplified_length_attention.py
 ```
 
-### Step 5: Tests
+Optional notebook:
 
-Add unit tests for:
+```text
+infinite_generalization/notebooks/simplified_length_aware_attention_model.ipynb
+```
 
-- length scale is positive and changes with length
-- length scale parameter receives gradient at length 10
-- attention probabilities sum to 1 over keys
-- output shapes match Stage 1
-- target-key bias does not use oracle target masks
-- forward pass has no NaNs for long lengths
-- fixed-length and multi-length training runners can execute smoke tests
+The visualization should plot `p_t(n)` over increasing `n` for:
 
-## Analysis Plan
+- constant `alpha`
+- `alpha(n) = log n` with `Delta < 1`
+- `alpha(n) = log n` with `Delta = 1`
+- `alpha(n) = log n` with `Delta > 1`
+- `alpha(n) = c log n` where `c Delta < 1`
+- `alpha(n) = c log n` where `c Delta > 1`
 
-After training, compare these runs:
+Recommended output:
 
-1. Stage 1 baseline
-2. Stage 2A multi-length transformer
-3. Stage 2B global log-temperature, fixed length 10
-4. Stage 2B target-key log-bias, fixed length 10
-5. Stage 2B global log-temperature, multi-length calibration
-6. Stage 2B target-key log-bias, multi-length calibration
+```text
+infinite_generalization/documents/figures/simplified_length_aware_attention_pt.png
+```
 
-For each run, answer:
+Use a log-scaled x-axis.
 
-- Did exactly-one positive accuracy remain stable at long lengths?
-- Did negative accuracy remain stable?
-- Did target attention mass decay more slowly than Stage 1?
-- Did the learned length scale become meaningful?
-- Did the intervention reduce harmful non-target max-pool contributions?
-- Did the final positive logit remain above zero?
+### 3. Stage 2B Analysis Update
 
-## Expected Interpretation
+Update:
 
-If global log-temperature works:
+```text
+infinite_generalization/documents/STAGE2B_LENGTH_AWARE_ATTENTION_ANALYSIS.md
+```
 
-- the Stage 1 failure is likely caused largely by insufficient attention sharpness under denominator growth
-- the target key already has enough rank advantage, but the softmax needs a length-dependent sharpening factor
+Add a concise section linking the empirical Stage 2B results to the simplified model.
 
-If global log-temperature fails but target-key bias works:
+The section should state:
 
-- the model needs a target-specific length correction, not just sharper attention
-- the target key is not consistently the top key under the base attention scores
+- global log-temperature failed because the learned effective margin was too weak
+- target-key bias worked better because it increased target-specific margin
+- multi-length training likely helped calibrate the target-key detector
+- finite-length success does not imply an infinite-length guarantee
 
-If both fail under fixed length 10 but improve under multi-length calibration:
+### 4. Optional Formula Tests
 
-- the architecture can use a `log(n)` correction, but length-10-only training does not identify the correct extrapolating parameter
+If the formula is implemented as reusable code, add tests for:
 
-If both fail even under multi-length calibration:
+- `p_t(n)` is always between 0 and 1
+- `(p_t(n), 1 - p_t(n))` sums to 1
+- constant `alpha` decays toward 0
+- `c Delta > 1` moves toward 1
+- `c Delta < 1` moves toward 0
+- `c Delta = 1` approaches 1/2
 
-- the Stage 1 degradation is not solved by attention scaling alone
-- the max-pool classifier or another part of the architecture may be the dominant failure source
-- the next priority should be final-classifier interventions, especially token-wise detector plus position-wise max
+If the formula exists only inside a plotting script, tests are optional.
 
-## Deliverables
+## Success Criteria
 
-- Stage 2B implementation
-- Stage 2B YAML configs
-- smoke tests and unit tests
-- metrics CSVs for all four intervention runs
-- attention summary CSVs including learned length-scale values
-- short `EXPERIMENT.md` update comparing Stage 1, Stage 2A, and Stage 2B
-- optional figures showing:
-  - learned `alpha(n)` or `beta(n)`
-  - target attention by length
-  - exactly-one positive accuracy by length
-  - positive and negative logits by length
-  - max-pool contribution decomposition by length
+This task is complete when:
 
-## Immediate Next Step
+- the theoretical note is written
+- the limiting cases are mathematically correct
+- the convex-combination correction is clearly stated
+- at least one figure illustrates the regimes
+- the Stage 1 and Stage 2B connections are explicit
+- the document can be reused in a future technical report
 
-Implement the global log-temperature variant first because it is the smallest architectural change.
+## Execution Order
 
-Then implement the target-key log-bias variant and compare whether target-specific correction is necessary.
+1. Write `SIMPLIFIED_LENGTH_AWARE_ATTENTION_MODEL.md`.
+2. Add the visualization script or notebook.
+3. Save the figure under `documents/figures/`.
+4. Update `STAGE2B_LENGTH_AWARE_ATTENTION_ANALYSIS.md`.
+5. Add formula tests only if reusable formula code is introduced.
