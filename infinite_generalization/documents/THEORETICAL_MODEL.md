@@ -305,24 +305,150 @@ $$
 
 The Stage 1 transformer therefore appears to learn a finite-margin target-detection mechanism rather than a true length-invariant existential algorithm.
 
-## Next Step
+## Empirical Fit Results
 
-Fit the reduced formula to the empirical Stage 1 length sweep:
+The formula was fit to the extended Stage 1 length sweep in:
+
+```text
+runs/stage1_transformer_maxpool2/numerical_analysis/theoretical_fit
+```
+
+The evaluated lengths were:
+
+```text
+10, 20, 50, 100, 200, 300, 400, 500, 600, 700, 800, 900,
+950, 1000, 1050, 1100, 1200, 1500, 2000, 3000, 5000, 10000
+```
+
+### Attention Fit
+
+The target attention curve is well explained by the fixed-margin softmax dilution formula:
 
 $$
+\operatorname{target\_attention\_mass}(\operatorname{sequence\_length})
+=
+\frac{
+1
+}{
+1
++
+(\operatorname{sequence\_length} - 1)
+\exp(-\operatorname{target\_score\_margin})
+}
+$$
+
+Fit result:
+
+| Quantity | Value |
+|---|---:|
+| target score margin | 5.9855 |
+| R-squared | 0.9586 |
+| mean absolute error | 0.0360 |
+| root mean squared error | 0.0472 |
+
+<img src="figures/target_attention_fit.png" alt="Target attention formula fit" width="560">
+
+This supports the fixed-margin interpretation. The learned effective margin is enough for short sequences, but it is smaller than the rough margin needed at long lengths:
+
+$$
+\log(1000) \approx 6.91
+$$
+
+$$
+\log(10000) \approx 9.21
+$$
+
+### Final Logit Fit
+
+The best reduced logit formula was:
+
+$$
+\operatorname{final\_logit}(\operatorname{sequence\_length})
+\approx
+7.2765
++
+6.8618
+\cdot
 \operatorname{observed\_target\_attention\_mass}(\operatorname{sequence\_length})
+-
+1.4136
+\cdot
+\log(\operatorname{sequence\_length})
 $$
 
-$$
-\operatorname{observed\_maxpool\_source\_contributions}(\operatorname{sequence\_length})
-$$
+Fit result:
+
+| Quantity | Value |
+|---|---:|
+| R-squared | 0.9846 |
+| mean absolute error | 0.4099 |
+| root mean squared error | 0.4861 |
+
+<img src="figures/positive_logit_fit.png" alt="Positive logit formula fit" width="560">
+
+This means that target attention decay alone is not the full explanation. The final logit is better explained by combining positive target evidence with a length-growing non-target penalty.
+
+### Max-Pool Contribution Fit
+
+The measured non-target-sourced max-pool contribution is also well fit by a logarithmic length penalty:
 
 $$
-\operatorname{observed\_final\_logit}(\operatorname{sequence\_length})
+\operatorname{non\_target\_sourced\_contribution}(\operatorname{sequence\_length})
+\approx
+13.2757
+-
+2.2212
+\cdot
+\log(\operatorname{sequence\_length})
 $$
 
-The fit should answer whether the observed failure can be quantitatively explained by:
+Fit result:
+
+| Model | R-squared | RMSE |
+|---|---:|---:|
+| non-target constant | 0.0000 | 3.7056 |
+| non-target \( \log(\operatorname{sequence\_length}) \) | 0.9579 | 0.7606 |
+| non-target \( \sqrt{2\log(\operatorname{sequence\_length})} \) | 0.9174 | 1.0648 |
+
+<img src="figures/maxpool_non_target_contribution_fit.png" alt="Non-target max-pool contribution fit" width="560">
+
+This supports the interpretation that the log-length penalty in the final-logit formula corresponds to a real max-pool interference effect, not just an arbitrary curve fit.
+
+The target-sourced contribution is comparatively stable but not exactly constant:
+
+| Model | RMSE |
+|---|---:|
+| target constant | 0.4395 |
+
+<img src="figures/maxpool_target_contribution_fit.png" alt="Target max-pool contribution fit" width="560">
+
+Therefore, the safer statement is:
+
+```text
+Target-sourced contribution changes much less than non-target-sourced contribution,
+but it should not be treated as perfectly constant.
+```
+
+## Current Conclusion
+
+The extended fit supports the reduced explanation:
 
 - fixed target score margin
 - softmax denominator growth
 - length-growing non-target interference
+
+More concretely:
+
+$$
+\operatorname{target\_attention\_mass}
+\text{ is explained by fixed-margin softmax dilution}
+$$
+
+and:
+
+$$
+\operatorname{final\_logit}
+\text{ is explained by target evidence minus a logarithmic non-target max-pool penalty}
+$$
+
+This is a close quantitative reproduction of the empirical Stage 1 failure curve, although it remains a reduced model rather than a full exact model of every transformer activation.

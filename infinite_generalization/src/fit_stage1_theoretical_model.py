@@ -242,6 +242,21 @@ def load_fit_data(
     )
 
 
+def load_maxpool_fit_data(analysis_dir: Path) -> tuple[list[float], list[float], list[float]]:
+    """Load measured target and non-target max-pool source contributions."""
+
+    maxpool_rows = read_csv(analysis_dir / "maxpool_source_summary.csv")
+    if len(maxpool_rows) < 3:
+        raise ValueError("need at least three rows in maxpool_source_summary.csv")
+
+    maxpool_rows.sort(key=lambda row: int(row["length"]))
+    return (
+        [float(row["length"]) for row in maxpool_rows],
+        [float(row["target_sourced_contribution_sum"]) for row in maxpool_rows],
+        [float(row["non_target_sourced_contribution_sum"]) for row in maxpool_rows],
+    )
+
+
 def logit_model_specs(
     *,
     observed_attention: list[float],
@@ -369,17 +384,122 @@ def fit_logit_models(
     return summary_rows, prediction_rows
 
 
+def fit_maxpool_contribution_models(
+    *,
+    lengths: list[float],
+    target_contributions: list[float],
+    non_target_contributions: list[float],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Fit reduced formulas to measured max-pool source contributions."""
+
+    summary_rows: list[dict[str, object]] = []
+    prediction_rows: list[dict[str, object]] = []
+
+    model_specs = [
+        {
+            "contribution_name": "target_sourced_contribution_sum",
+            "model_name": "target_constant",
+            "growth_name": "none",
+            "growth_function": None,
+            "targets": target_contributions,
+        },
+        {
+            "contribution_name": "non_target_sourced_contribution_sum",
+            "model_name": "non_target_constant",
+            "growth_name": "none",
+            "growth_function": None,
+            "targets": non_target_contributions,
+        },
+        {
+            "contribution_name": "non_target_sourced_contribution_sum",
+            "model_name": "non_target_log_length",
+            "growth_name": "log_length",
+            "growth_function": log_growth,
+            "targets": non_target_contributions,
+        },
+        {
+            "contribution_name": "non_target_sourced_contribution_sum",
+            "model_name": "non_target_sqrt_2_log_length",
+            "growth_name": "sqrt_2_log_length",
+            "growth_function": sqrt_log_growth,
+            "targets": non_target_contributions,
+        },
+    ]
+
+    for spec in model_specs:
+        growth_function = spec["growth_function"]
+        observed_values = spec["targets"]
+        if growth_function is None:
+            growth_values = [0.0 for _ in lengths]
+            features = [[1.0] for _ in lengths]
+            coefficients = fit_linear_model(features, observed_values)
+            intercept = coefficients[0]
+            growth_strength = 0.0
+        else:
+            growth_values = [growth_function(length) for length in lengths]
+            # The negative sign makes a positive coefficient mean length-growing suppression.
+            features = [[1.0, -growth] for growth in growth_values]
+            coefficients = fit_linear_model(features, observed_values)
+            intercept, growth_strength = coefficients
+
+        predicted_values = predict_linear_model(features, coefficients)
+        metrics = regression_metrics(observed_values, predicted_values)
+        summary_rows.append(
+            {
+                "contribution_name": spec["contribution_name"],
+                "model_name": spec["model_name"],
+                "growth_name": spec["growth_name"],
+                "intercept": intercept,
+                "growth_strength": growth_strength,
+                **metrics,
+            }
+        )
+
+        for length, growth_value, observed_value, predicted_value in zip(
+            lengths,
+            growth_values,
+            observed_values,
+            predicted_values,
+        ):
+            prediction_rows.append(
+                {
+                    "contribution_name": spec["contribution_name"],
+                    "model_name": spec["model_name"],
+                    "length": int(length),
+                    "interference_growth": growth_value,
+                    "observed_contribution": observed_value,
+                    "predicted_contribution": predicted_value,
+                    "residual": observed_value - predicted_value,
+                }
+            )
+
+    return summary_rows, prediction_rows
+
+
 def write_markdown_summary(
     path: Path,
     *,
     attention_summary: dict[str, float],
     logit_summary_rows: list[dict[str, object]],
+    maxpool_summary_rows: list[dict[str, object]],
 ) -> None:
     """Write a compact markdown report for the formula fits."""
 
     best_logit_row = min(
         logit_summary_rows,
         key=lambda row: float(row["root_mean_squared_error"]),
+    )
+    non_target_rows = [
+        row
+        for row in maxpool_summary_rows
+        if row["contribution_name"] == "non_target_sourced_contribution_sum"
+    ]
+    best_non_target_row = min(
+        non_target_rows,
+        key=lambda row: float(row["root_mean_squared_error"]),
+    )
+    target_constant_row = next(
+        row for row in maxpool_summary_rows if row["model_name"] == "target_constant"
     )
     lines = [
         "# Stage 1 Reduced Formula Fit",
@@ -405,8 +525,20 @@ def write_markdown_summary(
         f"| target_signal_strength | {float(best_logit_row['target_signal_strength']):.6f} |",
         f"| non_target_interference_strength | {float(best_logit_row['non_target_interference_strength']):.6f} |",
         "",
-        "See `attention_fit_by_length.csv`, `logit_fit_summary.csv`, and "
-        "`logit_fit_by_length.csv` for full results.",
+        "## Max-Pool Contribution Fit",
+        "",
+        "| Field | Value |",
+        "|---|---:|",
+        f"| target_constant_r_squared | {float(target_constant_row['r_squared']):.6f} |",
+        f"| target_constant_rmse | {float(target_constant_row['root_mean_squared_error']):.6f} |",
+        f"| best_non_target_model | {best_non_target_row['model_name']} |",
+        f"| best_non_target_r_squared | {float(best_non_target_row['r_squared']):.6f} |",
+        f"| best_non_target_rmse | {float(best_non_target_row['root_mean_squared_error']):.6f} |",
+        f"| best_non_target_growth_strength | {float(best_non_target_row['growth_strength']):.6f} |",
+        "",
+        "See `attention_fit_by_length.csv`, `logit_fit_summary.csv`, "
+        "`logit_fit_by_length.csv`, `maxpool_contribution_fit_summary.csv`, and "
+        "`maxpool_contribution_fit_by_length.csv` for full results.",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -416,6 +548,7 @@ def maybe_write_figures(
     *,
     attention_rows: list[dict[str, object]],
     logit_prediction_rows: list[dict[str, object]],
+    maxpool_prediction_rows: list[dict[str, object]],
 ) -> None:
     """Write PNG figures when matplotlib is available."""
 
@@ -474,6 +607,61 @@ def maybe_write_figures(
     fig.savefig(figure_dir / "positive_logit_fit.png", bbox_inches="tight")
     plt.close(fig)
 
+    target_rows = [
+        row for row in maxpool_prediction_rows if row["model_name"] == "target_constant"
+    ]
+    target_rows.sort(key=lambda row: int(row["length"]))
+    lengths = [int(row["length"]) for row in target_rows]
+    observed_values = [float(row["observed_contribution"]) for row in target_rows]
+    predicted_values = [float(row["predicted_contribution"]) for row in target_rows]
+
+    fig, ax = plt.subplots(figsize=(7, 4.2), dpi=160)
+    ax.plot(lengths, observed_values, marker="o", label="observed")
+    ax.plot(lengths, predicted_values, marker="o", label="constant fit")
+    ax.set_xscale("log")
+    ax.set_xlabel("sequence length")
+    ax.set_ylabel("target-sourced contribution")
+    ax.set_title("Target max-pool contribution fit")
+    ax.grid(True, alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(figure_dir / "maxpool_target_contribution_fit.png", bbox_inches="tight")
+    plt.close(fig)
+
+    non_target_model_name = min(
+        {
+            row["model_name"]
+            for row in maxpool_prediction_rows
+            if row["contribution_name"] == "non_target_sourced_contribution_sum"
+        },
+        key=lambda model_name: sum(
+            float(row["residual"]) ** 2
+            for row in maxpool_prediction_rows
+            if row["model_name"] == model_name
+        ),
+    )
+    non_target_rows = [
+        row for row in maxpool_prediction_rows if row["model_name"] == non_target_model_name
+    ]
+    non_target_rows.sort(key=lambda row: int(row["length"]))
+    lengths = [int(row["length"]) for row in non_target_rows]
+    observed_values = [float(row["observed_contribution"]) for row in non_target_rows]
+    predicted_values = [float(row["predicted_contribution"]) for row in non_target_rows]
+
+    fig, ax = plt.subplots(figsize=(7, 4.2), dpi=160)
+    ax.plot(lengths, observed_values, marker="o", label="observed")
+    ax.plot(lengths, predicted_values, marker="o", label="fitted formula")
+    ax.axhline(0.0, color="black", linestyle="--", linewidth=1)
+    ax.set_xscale("log")
+    ax.set_xlabel("sequence length")
+    ax.set_ylabel("non-target-sourced contribution")
+    ax.set_title(f"Non-target max-pool contribution fit: {non_target_model_name}")
+    ax.grid(True, alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(figure_dir / "maxpool_non_target_contribution_fit.png", bbox_inches="tight")
+    plt.close(fig)
+
 
 def main() -> None:
     """Fit reduced theoretical formulas to existing Stage 1 analysis CSVs."""
@@ -518,20 +706,34 @@ def main() -> None:
         observed_logits=observed_logits,
         target_score_margin=target_score_margin,
     )
+    (
+        maxpool_lengths,
+        target_contributions,
+        non_target_contributions,
+    ) = load_maxpool_fit_data(args.analysis_dir)
+    maxpool_summary_rows, maxpool_prediction_rows = fit_maxpool_contribution_models(
+        lengths=maxpool_lengths,
+        target_contributions=target_contributions,
+        non_target_contributions=non_target_contributions,
+    )
 
     write_csv(output_dir / "attention_fit_summary.csv", [attention_summary])
     write_csv(output_dir / "attention_fit_by_length.csv", attention_rows)
     write_csv(output_dir / "logit_fit_summary.csv", logit_summary_rows)
     write_csv(output_dir / "logit_fit_by_length.csv", logit_prediction_rows)
+    write_csv(output_dir / "maxpool_contribution_fit_summary.csv", maxpool_summary_rows)
+    write_csv(output_dir / "maxpool_contribution_fit_by_length.csv", maxpool_prediction_rows)
     write_markdown_summary(
         output_dir / "summary.md",
         attention_summary=attention_summary,
         logit_summary_rows=logit_summary_rows,
+        maxpool_summary_rows=maxpool_summary_rows,
     )
     maybe_write_figures(
         output_dir,
         attention_rows=attention_rows,
         logit_prediction_rows=logit_prediction_rows,
+        maxpool_prediction_rows=maxpool_prediction_rows,
     )
 
     print(f"Saved Stage 1 theoretical formula fits to {output_dir}")
