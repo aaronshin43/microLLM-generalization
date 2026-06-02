@@ -4,12 +4,15 @@
 
 This document summarizes the Stage 2B experiments that tested whether learned length-aware attention corrections can prevent the Stage 1 transformer's long-length failure.
 
-The motivating question was:
+The motivating question was whether the model can learn a length-dependent correction of the form:
 
-```text
-If target attention needs roughly a log(n)-scale advantage to remain dominant,
-can the model learn a k log(n) correction?
+```math
+k \log(1 + n)
 ```
+
+where `n` is the sequence length and `k` is a learned scalar parameter.
+
+The reason this correction is natural is that target attention must compete against a softmax denominator whose number of terms grows with sequence length.
 
 Stage 2B tested two intervention families:
 
@@ -32,28 +35,117 @@ Stage 2B keeps the Stage 1 transformer backbone intentionally close to the origi
 - max pooling over encoded token states
 - binary classifier on the pooled vector
 
-The main implementation change is that self-attention is computed manually instead of using `nn.MultiheadAttention` directly. This exposes the attention logits before softmax:
+The main implementation change is that self-attention is computed manually instead of using `nn.MultiheadAttention` directly. This exposes the attention score before softmax:
 
-```text
-base_score(i, j) = q_i dot k_j / sqrt(d_head)
+```math
+s_{ij}
+=
+\frac{q_i \cdot k_j}{\sqrt{d_{\mathrm{head}}}}
 ```
 
-The global temperature variant applies:
+Here:
 
-```text
-corrected_score(i, j) = alpha(n) * base_score(i, j)
-alpha(n) = 1 + softplus(k) * log1p(n)
+- `i` is the query position
+- `j` is the key position
+- `q_i` is the query vector at position `i`
+- `k_j` is the key vector at position `j`
+- `d_head` is the attention head dimension
+
+### Global Log-Temperature
+
+The global temperature variant multiplies every attention score by the same length-dependent factor:
+
+```math
+\tilde{s}_{ij}
+=
+\alpha(n) s_{ij}
 ```
 
-The target-key bias variant applies:
+with:
 
-```text
-target_like_j = linear(k_j)
-corrected_score(i, j) = base_score(i, j) + beta(n) * target_like_j
-beta(n) = softplus(k) * log1p(n)
+```math
+\alpha(n)
+=
+1
++
+\mathrm{softplus}(k_{\alpha}) \log(1+n)
 ```
 
-The target-key detector is learned from key representations only. It does not use the true target mask or label at evaluation time.
+The interpretation is simple: longer sequences make the attention softmax sharper everywhere.
+
+This is a weak intervention because it does not know which key is the target key.
+
+### Target-Key Log-Bias
+
+The target-key bias variant first computes a learned target-like score for each key:
+
+```math
+r_j
+=
+w_{\mathrm{target}}^\top k_j
++
+b_{\mathrm{target}}
+```
+
+Then it adds a length-dependent bias to each key:
+
+```math
+\tilde{s}_{ij}
+=
+s_{ij}
++
+\beta(n) r_j
+```
+
+with:
+
+```math
+\beta(n)
+=
+\mathrm{softplus}(k_{\beta}) \log(1+n)
+```
+
+Here `r_j` is learned from the key representation only. It does not use the true target mask or label at evaluation time.
+
+The interpretation is also simple: longer sequences give more score advantage to keys that the model judges to be target-like.
+
+### Corrected Attention Mass
+
+Both variants replace the original attention score `s_ij` with a corrected score:
+
+```math
+\tilde{s}_{ij}
+```
+
+The actual attention weight is then:
+
+```math
+a_{ij}
+=
+\frac{
+\exp(\tilde{s}_{ij})
+}{
+\sum_{\ell=1}^{n} \exp(\tilde{s}_{i\ell})
+}
+```
+
+For a target key position `t`, the relevant quantity is:
+
+```math
+a_{it}
+=
+\frac{
+\exp(\tilde{s}_{it})
+}{
+\exp(\tilde{s}_{it})
++
+\sum_{\ell \ne t} \exp(\tilde{s}_{i\ell})
+}
+```
+
+The purpose of Stage 2B is to make `tilde{s}_{it}` large enough that the target numerator remains competitive as the non-target denominator grows with `n`.
+
+Summary: **The intervention does not change the softmax itself; it changes the scores that enter the softmax denominator.**
 
 Summary: **Stage 2B changes only the attention score calculation, while keeping the rest of the small transformer classifier as close as possible to Stage 1.**
 
@@ -74,8 +166,10 @@ Long-length evaluation used `eval_batch_size = 1` for completed runs because att
 
 The only fully successful Stage 2B run was:
 
-```text
-target_key_log_bias + multi-length calibration
+```math
+\text{target-key log-bias}
++
+\text{multi-length calibration}
 ```
 
 Summary: **A learned log-length correction can help, but it needs both target-specific biasing and length variation during training.**
@@ -242,17 +336,31 @@ The successful run should be interpreted as a strong finite-length success, not 
 
 The reason is:
 
-```text
-target_attention_mean continues to decrease
-positive_logit continues to decrease
-attention_entropy continues to increase
+```math
+\mathrm{target\_attention\_mean}(n)
+\text{ decreases as } n \text{ grows}
+```
+
+```math
+\mathrm{positive\_logit}(n)
+\text{ decreases as } n \text{ grows}
+```
+
+```math
+\mathrm{attention\_entropy}(n)
+\text{ increases as } n \text{ grows}
 ```
 
 At length 10000 the model still has a positive logit margin:
 
-```text
-logit ~= 1.78
-probability ~= 0.856
+```math
+\mathrm{logit}(10000) \approx 1.78
+```
+
+and:
+
+```math
+\sigma(\mathrm{logit}(10000)) \approx 0.856
 ```
 
 but this margin is much smaller than at shorter lengths. If the same trend continues, the model may eventually cross the zero-logit decision boundary at longer lengths.
@@ -270,9 +378,18 @@ The Stage 2B results support four conclusions.
 
 The most important comparison is:
 
-```text
-global_log_temperature_multilength fails at length 10000
-target_key_log_bias_multilength succeeds at length 10000
+```math
+\text{global log-temperature + multi-length}
+\rightarrow
+\text{fails at } n = 10000
+```
+
+while:
+
+```math
+\text{target-key log-bias + multi-length}
+\rightarrow
+\text{succeeds at } n = 10000
 ```
 
 This means the problem is not only that attention needs to become sharper with length. The model also needs to know **which key** should receive the length-dependent advantage.
@@ -291,8 +408,10 @@ Yes, but not as a simple global multiplier.
 
 The successful mechanism was:
 
-```text
-target_key_log_bias + multi-length calibration
+```math
+\text{target-key log-bias}
++
+\text{multi-length calibration}
 ```
 
 This suggests that future transformer-preserving interventions should focus on target-specific or detector-style attention biases rather than only global softmax temperature scaling.
