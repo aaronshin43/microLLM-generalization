@@ -54,10 +54,10 @@ Define the fixed target-vs-non-target score margin:
 \Delta = a - b > 0.
 ```
 
-Apply inverse temperature $\alpha$ before softmax:
+Apply inverse temperature $\alpha(n)$ before softmax:
 
 ```math
-\operatorname{softmax}(\alpha S_n).
+\sigma(\alpha(n) S_n).
 ```
 
 ## Target Attention Mass
@@ -67,36 +67,36 @@ The target attention mass is:
 ```math
 p_t(n)
 =
-\frac{e^{\alpha a}}
-{e^{\alpha a} + (n-1)e^{\alpha b}}.
+\frac{e^{\alpha(n) a}}
+{e^{\alpha(n) a} + (n-1)e^{\alpha(n) b}}.
 ```
 
-Dividing the numerator and denominator by $e^{\alpha b}$ gives:
+Dividing the numerator and denominator by $e^{\alpha(n) b}$ gives:
 
 ```math
 p_t(n)
 =
-\frac{e^{\alpha(a-b)}}
-{e^{\alpha(a-b)} + (n-1)}
+\frac{e^{\alpha(n)(a-b)}}
+{e^{\alpha(n)(a-b)} + (n-1)}
 =
-\frac{e^{\alpha\Delta}}
-{e^{\alpha\Delta} + (n-1)}.
+\frac{e^{\alpha(n)\Delta}}
+{e^{\alpha(n)\Delta} + (n-1)}.
 ```
 
 The attention output after multiplying by $X_n$ is:
 
 ```math
-(p_t(n), 1 - p_t(n)).
+\sigma(\alpha(n)S_n)X_n=(p_t(n), 1 - p_t(n)).
 ```
 
-This output cannot converge to $(1, 1)$. It is a convex combination of $[1, 0]$ and $[0, 1]$, so its coordinates always sum to 1.
+It is a convex combination of $[1, 0]$ and $[0, 1]$, so its coordinates always sum to 1.
 
 ## Constant Temperature
 
 If:
 
 ```math
-\alpha = \alpha_0,
+\alpha(n) = \alpha_0,
 ```
 
 then:
@@ -108,7 +108,13 @@ p_t(n)
 {e^{\alpha_0\Delta} + (n-1)}
 \to 0
 \qquad
-\text{as } n \to \infty.
+\text{as } n \to \infty,
+```
+
+so:
+
+```math
+\sigma(\alpha(n)S_n)X_n=(0,1).
 ```
 
 Interpretation:
@@ -120,7 +126,7 @@ A fixed margin can beat each individual non-target token, but it cannot beat the
 If:
 
 ```math
-\alpha = \log n,
+\alpha(n) = \log n,
 ```
 
 then:
@@ -151,7 +157,7 @@ $\log n$ is not automatically sufficient. It works only when the target score ma
 If:
 
 ```math
-\alpha = c\log n,
+\alpha(n) = c\log n,
 ```
 
 then:
@@ -190,17 +196,17 @@ Start from the target attention mass:
 ```math
 p_t(n)
 =
-\frac{e^{\alpha\Delta}}
-{e^{\alpha\Delta} + (n-1)}.
+\frac{e^{\alpha(n)\Delta}}
+{e^{\alpha(n)\Delta} + (n-1)}.
 ```
 
-Divide the numerator and denominator by $e^{\alpha\Delta}$:
+Divide the numerator and denominator by $e^{\alpha(n)\Delta}$:
 
 ```math
 p_t(n)
 =
 \frac{1}
-{1 + (n-1)e^{-\alpha\Delta}}.
+{1 + (n-1)e^{-\alpha(n)\Delta}}.
 ```
 
 Define the non-target-to-target softmax ratio:
@@ -208,7 +214,7 @@ Define the non-target-to-target softmax ratio:
 ```math
 R_n
 =
-(n-1)e^{-\alpha\Delta}.
+(n-1)e^{-\alpha(n)\Delta}.
 ```
 
 Then:
@@ -230,7 +236,7 @@ Taking the log of $R_n$ gives:
 ```math
 \log R_n
 =
-\log(n-1) - \alpha\Delta.
+\log(n-1) - \alpha(n)\Delta.
 ```
 
 For large $n$, $\log(n-1)$ has the same asymptotic growth as $\log n$. Therefore:
@@ -242,19 +248,19 @@ R_n \to 0
 when:
 
 ```math
-\alpha\Delta - \log n \to +\infty.
+\alpha(n)\Delta - \log n \to +\infty.
 ```
 
 Target attention converges to 0 when the opposite happens:
 
 ```math
-\alpha\Delta - \log n \to -\infty.
+\alpha(n)\Delta - \log n \to -\infty.
 ```
 
 There is also a boundary case. If:
 
 ```math
-\alpha\Delta - \log n \to C,
+\alpha(n)\Delta - \log n \to C,
 ```
 
 where $C$ is finite, then:
@@ -299,7 +305,7 @@ Even if the target key has a higher score than each non-target key, the total no
 The global log-temperature intervention scales all attention scores:
 
 ```math
-\tilde{s}_{ij} = \alpha s_{ij}.
+\tilde{s}_{ij} = \alpha(n) s_{ij}.
 ```
 
 Here, $s_{ij}$ is the raw attention score from query position $i$ to key position $j$; in the simplified last-query case, that row is $S_n = (a,b,b,\ldots,b)$.
@@ -307,7 +313,7 @@ Here, $s_{ij}$ is the raw attention score from query position $i$ to key positio
 In the simplified model, this succeeds only when the scaled margin satisfies:
 
 ```math
-\alpha\Delta - \log n \to +\infty.
+\alpha(n)\Delta - \log n \to +\infty.
 ```
 
 For a $c\log n$ schedule, this requires:
