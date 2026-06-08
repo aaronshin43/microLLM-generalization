@@ -10,7 +10,11 @@ The motivating question was whether the model can learn a length-dependent corre
 k \log(1 + n)
 ```
 
-where `n` is the sequence length and `k` is a learned scalar parameter.
+Variables used here:
+
+- $n$ is the sequence length.
+- $k$ is a learned scalar parameter.
+- $\log(1+n)$ grows slowly with sequence length and is defined at $n=0$.
 
 The reason this correction is natural is that target attention must compete against a softmax denominator whose number of terms grows with sequence length.
 
@@ -43,13 +47,16 @@ s_{ij}
 \frac{q_i \cdot k_j}{\sqrt{d_{\mathrm{head}}}}
 ```
 
-Here:
+Variables used here:
 
-- `i` is the query position
-- `j` is the key position
-- `q_i` is the query vector at position `i`
-- `k_j` is the key vector at position `j`
-- `d_head` is the attention head dimension
+- $s_{ij}$ is the raw attention score from query position $i$ to key position $j$.
+- $i$ is the query position.
+- $j$ is the key position.
+- $q_i$ is the query vector at position $i$.
+- $k_j$ is the key vector at position $j$.
+- $q_i \cdot k_j$ is the dot product between the query and key vectors.
+- $d_{\mathrm{head}}$ is the attention head dimension.
+- $\sqrt{d_{\mathrm{head}}}$ is the standard transformer scaling factor that prevents dot products from becoming too large.
 
 ### Global Log-Temperature
 
@@ -61,6 +68,13 @@ The global temperature variant multiplies every attention score by the same leng
 \alpha(n) s_{ij}
 ```
 
+Variables used here:
+
+- $\tilde{s}_{ij}$ is the corrected attention score after applying the intervention.
+- $s_{ij}$ is the original raw attention score.
+- $\alpha(n)$ is a length-dependent multiplier shared by all attention scores.
+- $n$ is the sequence length.
+
 with:
 
 ```math
@@ -70,6 +84,14 @@ with:
 +
 \mathrm{softplus}(k_{\alpha}) \log(1+n)
 ```
+
+Variables used here:
+
+- $\alpha(n)$ is the global length-dependent score multiplier.
+- $k_{\alpha}$ is a learned scalar parameter.
+- $\mathrm{softplus}(x)=\log(1+e^x)$.
+- $\mathrm{softplus}(k_{\alpha})$ is always positive, so the learned length correction cannot flip the sign of the scale.
+- $\log(1+n)$ is the length-dependent growth term.
 
 The interpretation is simple: longer sequences make the attention softmax sharper everywhere.
 
@@ -87,6 +109,16 @@ w_{\mathrm{target}}^\top k_j
 b_{\mathrm{target}}
 ```
 
+Here, "key" means the $K$ vector in QKV attention. Each token position $j$ has a key vector $k_j$, and the model uses that key vector to decide whether the position looks like the target token.
+
+Variables used here:
+
+- $r_j$ is the learned target-likeness score for key position $j$.
+- $w_{\mathrm{target}}$ is a learned vector used to detect target-like keys.
+- $k_j$ is the key vector at position $j$.
+- $b_{\mathrm{target}}$ is a learned scalar bias.
+- $w_{\mathrm{target}}^\top k_j$ is a dot product.
+
 Then it adds a length-dependent bias to each key:
 
 ```math
@@ -97,6 +129,14 @@ s_{ij}
 \beta(n) r_j
 ```
 
+Variables used here:
+
+- $\tilde{s}_{ij}$ is the corrected attention score.
+- $s_{ij}$ is the original raw attention score.
+- $\beta(n)$ is a length-dependent bias scale.
+- $r_j$ is the learned target-likeness score for key position $j$.
+- The added term depends on the key position $j$, not on the query position $i$.
+
 with:
 
 ```math
@@ -105,13 +145,23 @@ with:
 \mathrm{softplus}(k_{\beta}) \log(1+n)
 ```
 
-Here `r_j` is learned from the key representation only. It does not use the true target mask or label at evaluation time.
+Variables used here:
+
+- $\beta(n)$ is the length-dependent target-key bias scale.
+- $k_{\beta}$ is a learned scalar parameter.
+- $\mathrm{softplus}(x)=\log(1+e^x)$.
+- $\mathrm{softplus}(k_{\beta})$ is always positive, so the length-dependent bias strength is nonnegative.
+- $\log(1+n)$ is the length-dependent growth term.
+
+Here $r_j$ is learned from the key representation only. It does not use the true target mask or label at evaluation time.
 
 The interpretation is also simple: longer sequences give more score advantage to keys that the model judges to be target-like.
 
+In other words, global log-temperature sharpens all attention scores, while target-key log-bias selectively increases scores pointing toward key positions that the model detects as target-like.
+
 ### Corrected Attention Mass
 
-Both variants replace the original attention score `s_ij` with a corrected score:
+Both variants replace the original attention score $s_{ij}$ with a corrected score:
 
 ```math
 \tilde{s}_{ij}
@@ -123,27 +173,43 @@ The actual attention weight is then:
 a_{ij}
 =
 \frac{
-\exp(\tilde{s}_{ij})
+e^{\tilde{s}_{ij}}
 }{
-\sum_{\ell=1}^{n} \exp(\tilde{s}_{i\ell})
+\sum_{\ell=1}^{n} e^{\tilde{s}_{i\ell}}
 }
 ```
 
-For a target key position `t`, the relevant quantity is:
+Variables used here:
+
+- $a_{ij}$ is the final attention weight from query position $i$ to key position $j$.
+- $\tilde{s}_{ij}$ is the corrected attention score.
+- $\ell$ is the summation index over all key positions.
+- $n$ is the sequence length.
+- The denominator is the corrected softmax denominator.
+
+For a target key position $t$, the relevant quantity is:
 
 ```math
 a_{it}
 =
 \frac{
-\exp(\tilde{s}_{it})
+e^{\tilde{s}_{it}}
 }{
-\exp(\tilde{s}_{it})
+e^{\tilde{s}_{it}}
 +
-\sum_{\ell \ne t} \exp(\tilde{s}_{i\ell})
+\sum_{\ell \ne t} e^{\tilde{s}_{i\ell}}
 }
 ```
 
-The purpose of Stage 2B is to make `tilde{s}_{it}` large enough that the target numerator remains competitive as the non-target denominator grows with `n`.
+Variables used here:
+
+- $a_{it}$ is the attention weight assigned to the target key position $t$ by query position $i$.
+- $\tilde{s}_{it}$ is the corrected target-key score.
+- $\ell \ne t$ means the sum is over non-target key positions.
+- The numerator is the target contribution.
+- The denominator is the target contribution plus all non-target contributions.
+
+The purpose of Stage 2B is to make $\tilde{s}_{it}$ large enough that the target numerator remains competitive as the non-target denominator grows with $n$.
 
 Summary: **The intervention does not change the softmax itself; it changes the scores that enter the softmax denominator.**
 
