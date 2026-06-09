@@ -8,15 +8,11 @@ I implemented this reduced model as a trainable architecture and tested whether 
 
 The central question is:
 
-```text
-Can a trainable reduced attention model reproduce the theoretical length behavior predicted by the simplified model?
-```
+**Can a trainable reduced attention model reproduce the theoretical length behavior predicted by the simplified model?**
 
 The main answer is:
 
-```text
-Yes, in this reduced setting. The trained model satisfies the two-score assumption, so the closed-form attention equation applies. With enough optimization, learned-log attention can move from a finite-length regime into the asymptotic regime cΔ > 1.
-```
+**Yes, in this reduced setting. The trained model satisfies the two-score assumption, so the closed-form attention equation applies. With enough optimization, learned-log attention can move from a finite-length regime into the asymptotic regime $c\Delta>1$.**
 
 ## Terminology: Two-Score Assumption
 
@@ -395,9 +391,7 @@ The important empirical check is not whether the closed-form formula matches the
 
 The important check is:
 
-```text
-Does the trained model satisfy the two-score assumption?
-```
+**Does the trained model satisfy the two-score assumption?**
 
 The answer is yes. In every analyzed Stage 3 run, the non-target score standard deviation was 0.0 at every evaluated length.
 
@@ -474,9 +468,7 @@ Observed pattern:
 
 Summary:
 
-```text
-Constant multiplier learns a stronger finite-length solution with more training, not an asymptotically length-invariant solution.
-```
+**Constant multiplier learns a stronger finite-length solution with more training, not an asymptotically length-invariant solution.**
 
 ### Log Multiplier
 
@@ -508,9 +500,7 @@ Observed behavior:
 
 Summary:
 
-```text
-The fixed log multiplier behaves as predicted: Δ > 1 gives asymptotically dominant target attention.
-```
+**The fixed log multiplier behaves as predicted: $\Delta>1$ gives asymptotically dominant target attention.**
 
 ### Learned-Log Multiplier
 
@@ -548,9 +538,7 @@ The 50-epoch learned-log run was undertrained. It learned $c\Delta<1$, so it was
 
 Summary:
 
-```text
-The learned-log model can learn the infinite-length solution in this reduced setting, but only after enough optimization pushes cΔ above 1.
-```
+**The learned-log model can learn the infinite-length solution in this reduced setting, but only after enough optimization pushes $c\Delta$ above 1.**
 
 ## Main Empirical Result
 
@@ -558,9 +546,7 @@ The main empirical result is not that the closed-form formula matches softmax. O
 
 The main empirical result is:
 
-```text
-The trained reduced architecture satisfies the two-score assumption, and sufficient optimization moves learned-log attention from cΔ < 1 to cΔ > 1.
-```
+**The trained reduced architecture satisfies the two-score assumption, and sufficient optimization moves learned-log attention from $c\Delta<1$ to $c\Delta>1$.**
 
 This means Stage 3 supports the professor's simplified analysis in the exact setting where the assumptions are enforced by the data structure and learned architecture.
 
@@ -583,9 +569,7 @@ Stage 2B tried to fix the Stage 1 failure by making attention length-aware.
 
 The Stage 3 result clarifies what such an intervention must achieve:
 
-```text
-It must create an effective target-vs-non-target margin that grows fast enough to beat the log-length denominator term.
-```
+**It must create an effective target-vs-non-target margin that grows fast enough to beat the log-length denominator term.**
 
 For a learned-log multiplier, the simplified threshold is:
 
@@ -606,9 +590,7 @@ The full transformer can violate the simplified assumptions:
 
 Therefore:
 
-```text
-Stage 3 proves that the length-aware mechanism can work when the two-score assumption holds. Stage 2B still requires separate analysis because the full transformer may fail to create or preserve that assumption.
-```
+**Stage 3 proves that the length-aware mechanism can work when the two-score assumption holds. Stage 2B still requires separate analysis because the full transformer may fail to create or preserve that assumption.**
 
 ## Final Conclusion
 
@@ -616,9 +598,7 @@ Stage 3 starts from the professor's simplified model, implements it as a trainab
 
 The result is:
 
-```text
-In the reduced setting, the trained model satisfies the two-score assumption required by the closed-form formula. Once that assumption holds, the decisive question becomes whether optimization reaches the correct asymptotic regime. Constant multiplier cannot do so; fixed log multiplier succeeds when Δ > 1; learned-log multiplier succeeds once training pushes cΔ > 1.
-```
+**In the reduced setting, the trained model satisfies the two-score assumption required by the closed-form formula. Once that assumption holds, the decisive question becomes whether optimization reaches the correct asymptotic regime. Constant multiplier cannot do so; fixed log multiplier succeeds when $\Delta>1$; learned-log multiplier succeeds once training pushes $c\Delta>1$.**
 
 This is useful groundwork for the full transformer experiments because it separates two problems:
 
