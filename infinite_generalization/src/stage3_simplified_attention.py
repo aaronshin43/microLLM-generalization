@@ -33,11 +33,11 @@ class Stage3Config:
     train_length: int = 10
     train_examples: int = 2_000
     val_examples: int = 500
-    test_examples: int = 1_000
-    eval_lengths: tuple[int, ...] = (10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)
+    test_examples: int = 50
+    eval_lengths: tuple[int, ...] = (10, 100, 1000, 10000, 100000, 1000000, 5000000, 10000000)
     batch_size: int = 64
-    eval_batch_size: int = 256
-    epochs: int = 50
+    eval_batch_size: int = 16
+    epochs: int = 200
     learning_rate: float = 3e-3
     weight_decay: float = 0.0
     d_head: int = 2
