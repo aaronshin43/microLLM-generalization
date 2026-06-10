@@ -1,16 +1,10 @@
 # CLAUDE.md
 
-This file provides concise guidance to Claude Code when working in this repository.
+This file provides concise guidance to Claude Code working in this repository.
 
 ## Source Of Truth
 
 Treat `infinite_generalization/documents/` as the source of truth for research intent and experiment design.
-
-Read these before changing experiment logic:
-
-- `infinite_generalization/documents/PLAN.md`
-- `infinite_generalization/documents/initial_step.md`
-- `infinite_generalization/documents/infinite_length_generalization_transformers.md`
 
 ## Commands And Setup
 
@@ -31,3 +25,8 @@ Read these before changing experiment logic:
 - Write activity log entries in English.
 - Use a title, such as `May 26 Activity Log`, and a short body.
 - Keep entries concise unless explicitly asked for detail.
+
+## Commit Guidelines
+
+- Write commit messages in English.
+- Keep commit messages focused on the main change.

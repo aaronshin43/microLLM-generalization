@@ -6,12 +6,6 @@ This file provides concise guidance to coding agents working in this repository.
 
 Treat `infinite_generalization/documents/` as the source of truth for research intent and experiment design.
 
-Read these before changing experiment logic:
-
-- `infinite_generalization/documents/PLAN.md`
-- `infinite_generalization/documents/initial_step.md`
-- `infinite_generalization/documents/infinite_length_generalization_transformers.md`
-
 ## Commands And Setup
 
 - Use the commands in `infinite_generalization/README.md`.
@@ -35,4 +29,4 @@ Read these before changing experiment logic:
 ## Commit Guidelines
 
 - Write commit messages in English.
-- Keep commit messages short and focused on the main change.
+- Keep commit messages focused on the main change.
