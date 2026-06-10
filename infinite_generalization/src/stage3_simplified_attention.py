@@ -31,6 +31,7 @@ class Stage3Config:
     output_dir: str = "runs/stage3_simplified_attention"
     alpha_mode: str = "constant"
     train_length: int = 10
+    train_lengths: tuple[int, ...] = ()
     train_examples: int = 2_000
     val_examples: int = 500
     test_examples: int = 50
@@ -38,6 +39,7 @@ class Stage3Config:
     batch_size: int = 64
     eval_batch_size: int = 16
     epochs: int = 200
+    max_train_steps: int | None = None
     learning_rate: float = 3e-3
     weight_decay: float = 0.0
     d_head: int = 2
@@ -63,6 +65,13 @@ def parse_args() -> argparse.Namespace:
         default=Stage3Config.alpha_mode,
     )
     parser.add_argument("--train-length", type=int, default=Stage3Config.train_length)
+    parser.add_argument(
+        "--train-lengths",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Training lengths. If omitted, --train-length is used.",
+    )
     parser.add_argument("--train-examples", type=int, default=Stage3Config.train_examples)
     parser.add_argument("--val-examples", type=int, default=Stage3Config.val_examples)
     parser.add_argument("--test-examples", type=int, default=Stage3Config.test_examples)
@@ -76,6 +85,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=Stage3Config.batch_size)
     parser.add_argument("--eval-batch-size", type=int, default=Stage3Config.eval_batch_size)
     parser.add_argument("--epochs", type=int, default=Stage3Config.epochs)
+    parser.add_argument(
+        "--max-train-steps",
+        type=int,
+        default=Stage3Config.max_train_steps,
+        help="Optional optimizer update budget. Overrides epoch-limited training when set.",
+    )
     parser.add_argument("--learning-rate", type=float, default=Stage3Config.learning_rate)
     parser.add_argument("--weight-decay", type=float, default=Stage3Config.weight_decay)
     parser.add_argument("--d-head", type=int, default=Stage3Config.d_head)
@@ -99,12 +114,21 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
     if args.smoke_test and output_dir == Stage3Config.output_dir:
         output_dir = "runs/stage3_simplified_attention_smoke"
 
+    train_lengths = tuple(args.train_lengths) if args.train_lengths else (args.train_length,)
+    if not train_lengths:
+        raise ValueError("At least one training length is required.")
+    if any(length < 2 for length in train_lengths):
+        raise ValueError("All training lengths must be at least 2.")
+    if args.max_train_steps is not None and args.max_train_steps < 1:
+        raise ValueError("--max-train-steps must be positive when provided.")
+
     config = Stage3Config(
         seed=args.seed,
         device=args.device,
         output_dir=output_dir,
         alpha_mode=args.alpha_mode,
         train_length=args.train_length,
+        train_lengths=train_lengths,
         train_examples=args.train_examples,
         val_examples=args.val_examples,
         test_examples=args.test_examples,
@@ -112,6 +136,7 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         batch_size=args.batch_size,
         eval_batch_size=args.eval_batch_size,
         epochs=args.epochs,
+        max_train_steps=args.max_train_steps,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         d_head=args.d_head,
@@ -127,6 +152,7 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         output_dir=config.output_dir,
         alpha_mode=config.alpha_mode,
         train_length=10,
+        train_lengths=config.train_lengths,
         train_examples=64,
         val_examples=32,
         test_examples=40,
@@ -134,6 +160,7 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         batch_size=16,
         eval_batch_size=20,
         epochs=2,
+        max_train_steps=config.max_train_steps,
         learning_rate=config.learning_rate,
         weight_decay=config.weight_decay,
         d_head=config.d_head,
@@ -211,6 +238,46 @@ def make_loader(
         shuffle=shuffle,
         generator=generator if shuffle else None,
     )
+
+
+def resolved_train_lengths(config: Stage3Config) -> tuple[int, ...]:
+    """Return the active training lengths, preserving backward compatibility."""
+
+    return config.train_lengths if config.train_lengths else (config.train_length,)
+
+
+def make_multilength_loaders(
+    *,
+    lengths: tuple[int, ...],
+    examples_per_length: int,
+    batch_size: int,
+    shuffle: bool,
+    seed: int,
+) -> list[DataLoader]:
+    """Create one loader per training length.
+
+    Different sequence lengths cannot be placed in one TensorDataset without padding.
+    Padding would change the attended length, so Stage 3B keeps each batch single-length
+    and shuffles the order of length-specific batches during training.
+    """
+
+    loaders: list[DataLoader] = []
+    for offset, length in enumerate(lengths):
+        inputs, labels = make_two_token_dataset(
+            length=length,
+            examples=examples_per_length,
+            seed=seed + offset,
+        )
+        loaders.append(
+            make_loader(
+                inputs,
+                labels,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                seed=seed + 10_000 + offset,
+            )
+        )
+    return loaders
 
 
 class SimplifiedLastQueryAttentionClassifier(nn.Module):
@@ -374,6 +441,65 @@ def run_epoch(
     logits_cpu = torch.cat(all_logits)
     labels_cpu = torch.cat(all_labels)
     return total_loss / total_examples, binary_accuracy(logits_cpu, labels_cpu)
+
+
+def run_loaders_once(
+    model: SimplifiedLastQueryAttentionClassifier,
+    loaders: list[DataLoader],
+    *,
+    criterion: nn.Module,
+    device: torch.device,
+    optimizer: torch.optim.Optimizer | None = None,
+    max_steps: int | None = None,
+    batch_shuffle_seed: int | None = None,
+) -> tuple[float, dict[str, float], int]:
+    """Run one pass over length-specific loaders.
+
+    Returns the loss, accuracy metrics, and number of optimizer updates performed.
+    """
+
+    is_training = optimizer is not None
+    model.train(is_training)
+
+    batches = [batch for loader in loaders for batch in loader]
+    if batch_shuffle_seed is not None:
+        random.Random(batch_shuffle_seed).shuffle(batches)
+
+    total_loss = 0.0
+    total_examples = 0
+    update_count = 0
+    all_logits: list[torch.Tensor] = []
+    all_labels: list[torch.Tensor] = []
+
+    for tokens, labels in batches:
+        if is_training and max_steps is not None and update_count >= max_steps:
+            break
+
+        tokens = tokens.to(device)
+        labels = labels.to(device)
+
+        with torch.set_grad_enabled(is_training):
+            logits = model(tokens)
+            loss = criterion(logits, labels)
+
+        if is_training:
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
+            update_count += 1
+
+        batch_size = labels.shape[0]
+        total_loss += loss.item() * batch_size
+        total_examples += batch_size
+        all_logits.append(logits.detach().cpu())
+        all_labels.append(labels.detach().cpu())
+
+    if total_examples == 0:
+        return float("nan"), {"accuracy": float("nan"), "positive_accuracy": float("nan"), "negative_accuracy": float("nan")}, update_count
+
+    logits_cpu = torch.cat(all_logits)
+    labels_cpu = torch.cat(all_labels)
+    return total_loss / total_examples, binary_accuracy(logits_cpu, labels_cpu), update_count
 
 
 @torch.no_grad()
@@ -645,32 +771,23 @@ def train_model(
     *,
     device: torch.device,
     output_dir: Path,
-) -> SimplifiedLastQueryAttentionClassifier:
+) -> tuple[SimplifiedLastQueryAttentionClassifier, int]:
     """Train the simplified attention model."""
 
-    train_inputs, train_labels = make_two_token_dataset(
-        length=config.train_length,
-        examples=config.train_examples,
-        seed=config.seed + 1,
-    )
-    val_inputs, val_labels = make_two_token_dataset(
-        length=config.train_length,
-        examples=config.val_examples,
-        seed=config.seed + 2,
-    )
-    train_loader = make_loader(
-        train_inputs,
-        train_labels,
+    train_lengths = resolved_train_lengths(config)
+    train_loaders = make_multilength_loaders(
+        lengths=train_lengths,
+        examples_per_length=config.train_examples,
         batch_size=config.batch_size,
         shuffle=True,
-        seed=config.seed + 3,
+        seed=config.seed + 1,
     )
-    val_loader = make_loader(
-        val_inputs,
-        val_labels,
+    val_loaders = make_multilength_loaders(
+        lengths=train_lengths,
+        examples_per_length=config.val_examples,
         batch_size=config.eval_batch_size,
         shuffle=False,
-        seed=config.seed + 4,
+        seed=config.seed + 2,
     )
 
     model = SimplifiedLastQueryAttentionClassifier(
@@ -686,17 +803,33 @@ def train_model(
     )
 
     history_rows: list[dict[str, float | int | str]] = []
-    for epoch in range(1, config.epochs + 1):
-        train_loss, train_metrics = run_epoch(
+    optimizer_updates = 0
+    epoch = 0
+    while True:
+        if config.max_train_steps is None and epoch >= config.epochs:
+            break
+        if config.max_train_steps is not None and optimizer_updates >= config.max_train_steps:
+            break
+
+        epoch += 1
+        remaining_steps = (
+            None
+            if config.max_train_steps is None
+            else config.max_train_steps - optimizer_updates
+        )
+        train_loss, train_metrics, updates_this_epoch = run_loaders_once(
             model,
-            train_loader,
+            train_loaders,
             criterion=criterion,
             device=device,
             optimizer=optimizer,
+            max_steps=remaining_steps,
+            batch_shuffle_seed=config.seed + 20_000 + epoch,
         )
-        val_loss, val_metrics = run_epoch(
+        optimizer_updates += updates_this_epoch
+        val_loss, val_metrics, _ = run_loaders_once(
             model,
-            val_loader,
+            val_loaders,
             criterion=criterion,
             device=device,
             optimizer=None,
@@ -704,6 +837,8 @@ def train_model(
         history_rows.append(
             {
                 "epoch": epoch,
+                "optimizer_updates": optimizer_updates,
+                "updates_this_epoch": updates_this_epoch,
                 "train_loss": train_loss,
                 "train_accuracy": train_metrics["accuracy"],
                 "train_positive_accuracy": train_metrics["positive_accuracy"],
@@ -716,7 +851,7 @@ def train_model(
         )
 
     write_csv(output_dir / "train_history.csv", history_rows)
-    return model
+    return model, optimizer_updates
 
 
 def main() -> None:
@@ -728,19 +863,23 @@ def main() -> None:
     device = resolve_device(config.device)
     output_dir = project_dir() / config.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+    train_lengths = resolved_train_lengths(config)
 
+    model, optimizer_updates = train_model(config, device=device, output_dir=output_dir)
     write_json(
         output_dir / "config.json",
         {
             **asdict(config),
             "eval_lengths": list(config.eval_lengths),
+            "train_lengths": list(train_lengths),
+            "train_length_count": len(train_lengths),
+            "examples_per_train_length": config.train_examples,
+            "optimizer_updates": optimizer_updates,
             "resolved_device": str(device),
             "target_token_id": TARGET_TOKEN_ID,
             "non_target_token_id": NON_TARGET_TOKEN_ID,
         },
     )
-
-    model = train_model(config, device=device, output_dir=output_dir)
 
     rows = [
         evaluate_length(
@@ -753,7 +892,12 @@ def main() -> None:
         )
         for length in config.eval_lengths
     ]
-    add_train_delta_theory(rows, train_length=config.train_length)
+    add_train_delta_theory(rows, train_length=train_lengths[0])
+    for row in rows:
+        row["train_lengths"] = " ".join(str(length) for length in train_lengths)
+        row["train_length_count"] = len(train_lengths)
+        row["optimizer_updates"] = optimizer_updates
+        row["examples_per_train_length"] = config.train_examples
     write_csv(output_dir / "metrics_by_length.csv", rows)
     write_figures(output_dir, rows)
 

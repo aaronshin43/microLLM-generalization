@@ -550,6 +550,65 @@ The main empirical result is:
 
 This means Stage 3 supports the professor's simplified analysis in the exact setting where the assumptions are enforced by the data structure and learned architecture.
 
+## Stage 3B: Multi-Length Training Negative Result
+
+Stage 3B tested whether multi-length training makes the learned-log model reach the asymptotic regime more quickly or more reliably. The hypothesis was that training on several lengths would create stronger pressure to increase the effective exponent:
+
+```math
+c\Delta.
+```
+
+The tested multi-length settings included short mixtures such as:
+
+- $[10,20,50]$
+- $[10,20,50,100]$
+
+and broader log-spaced mixtures such as:
+
+- $[10,100,1000]$
+- $[10,100,1000,10000]$
+- $[10,100,1000,10000,100000]$
+
+The result was negative:
+
+**Multi-length training did not help learned-log attention reach the asymptotic regime. Across broader training lengths and seed changes, the model increased the raw margin $\Delta$ but kept the learned log coefficient $c$ low, leaving $c\Delta<1$.**
+
+Representative 6400-update results at evaluation length 10M:
+
+The estimated failure length is a rough classifier-threshold estimate. Runs with $c\Delta>1$ have no finite asymptotic crossing under the simplified model.
+
+| Training lengths | Seed | $c$ | $\Delta$ | $c\Delta$ | Positive logit at 10M | Positive accuracy at 10M | Estimated failure length |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| $[10]$ | 42 | 0.1362 | 8.3072 | 1.1315 | 6.8062 | 1.0000 | no finite crossing |
+| $[10,20,50]$ | 42 | 0.0778 | 9.1515 | 0.7124 | 6.7147 | 1.0000 | about $7.1\times10^{13}$ |
+| $[10,20,50,100]$ | 42 | 0.0701 | 9.4509 | 0.6623 | 6.6312 | 1.0000 | about $1.5\times10^{12}$ |
+| $[10,100,1000,10000,100000]$ | 42 | 0.0689 | 10.7430 | 0.7398 | 6.8771 | 1.0000 | about $1.0\times10^{18}$ |
+| $[10,100,1000,10000,100000]$ | 123 | 0.0793 | 10.4889 | 0.8321 | 6.1681 | 1.0000 | about $1.8\times10^{27}$ |
+
+The observed pattern was:
+
+```math
+\Delta \uparrow,
+\qquad
+c \downarrow,
+\qquad
+c\Delta<1.
+```
+
+This means multi-length training improved finite-length fitting, but it did not by itself create pressure to learn the asymptotic log correction. Even when the training set included length 100000, the model could still solve the finite supervised objective by increasing the raw margin $\Delta$ rather than learning a larger log coefficient $c$.
+
+The most plausible interpretation for the multi-length result is:
+
+- Adding longer training lengths increases pressure to solve larger finite denominators, but the optimizer appears to satisfy that pressure mainly by increasing $\Delta$ through the query/key projections.
+- Multi-length training did not specifically encourage increasing $c$; in fact, broader length mixtures consistently learned lower $c$ than the single-length baseline at the same update budget.
+- The finite BCE objective is still a finite-length objective. This is also true for single-length training, but Stage 3B shows that adding more finite lengths does not automatically turn the objective into an asymptotic one.
+- A sufficiently large $\Delta$ remains a strong finite-length solution, even when the training distribution includes length 100000. This explains why multi-length runs can achieve high 10M logits while still staying below $c\Delta>1$.
+- Because $c$ and $\Delta$ interact through their product, finite data can make multiple $(c,\Delta)$ combinations look similarly good. In these runs, multi-length optimization tended toward lower $c$ and higher $\Delta$.
+
+Therefore:
+
+**Stage 3B is evidence against the hypothesis that multi-length training alone makes the learned-log asymptotic regime easier to reach.**
+
 ## Connection To Stage 1
 
 Stage 1 failed because positive target evidence weakened with length. The simplified model explains one possible mechanism:
@@ -598,7 +657,7 @@ Stage 3 starts from the professor's simplified model, implements it as a trainab
 
 The result is:
 
-**In the reduced setting, the trained model satisfies the two-score assumption required by the closed-form formula. Once that assumption holds, the decisive question becomes whether optimization reaches the correct asymptotic regime. Constant multiplier cannot do so; fixed log multiplier succeeds when $\Delta>1$; learned-log multiplier succeeds once training pushes $c\Delta>1$.**
+**In the reduced setting, the trained model satisfies the two-score assumption required by the closed-form formula. Once that assumption holds, the decisive question becomes whether optimization reaches the correct asymptotic regime. Constant multiplier cannot do so; fixed log multiplier succeeds when $\Delta>1$; learned-log multiplier succeeds once training pushes $c\Delta>1$. Stage 3B shows that multi-length training alone does not reliably create that pressure.**
 
 This is useful groundwork for the full transformer experiments because it separates two problems:
 
@@ -614,3 +673,4 @@ Recommended follow-up work:
 - Add controlled fixed-$c$ experiments for $c\Delta<1$, $c\Delta=1$, and $c\Delta>1$.
 - Compare the Stage 3 $c\Delta$ threshold with the effective margin behavior in Stage 2B target-key log-bias runs.
 - Analyze whether the full transformer can create the same shared non-target score pattern without the reduced setup.
+- If revisiting Stage 3B, test explicit regularization or objective terms that reward $c\Delta>1$ rather than only finite-length classification accuracy.
