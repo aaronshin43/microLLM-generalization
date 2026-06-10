@@ -1,467 +1,227 @@
-# Task: Empirical Validation Of The Simplified Length-Aware Attention Model
+# Task: Stage 3B Multi-Length Training In The Simplified Attention Model
 
 ## Objective
 
-Implement the simplified length-aware attention model described in `SIMPLIFIED_LENGTH_AWARE_ATTENTION_MODEL.md` and test whether the theoretical prediction matches empirical behavior when the model is actually trained.
+Extend the Stage 3 simplified length-aware attention experiment from single-length training to multi-length training.
+
+Stage 3 showed that the reduced attention model can satisfy the two-score assumption and that learned-log attention can reach the asymptotic regime when optimization pushes:
+
+```math
+c\Delta>1.
+```
+
+Stage 3B asks whether training on several short lengths makes this easier or more stable.
 
 The central question is:
 
-```text
-Does the theory match practice when this exact simplified model is used for the learning process?
-```
-
-This task should produce a small, controlled experiment that is much simpler than the full Stage 1 or Stage 2B transformer. The goal is to isolate the attention dilution mechanism and directly compare:
-
-- theoretical target attention mass
-- measured target attention mass from the trained model
-- learned target-vs-non-target score margin
-- binary classification accuracy by sequence length
+**Does multi-length training help the reduced learned-log model reach the $c\Delta>1$ regime faster or more reliably than length-10-only training?**
 
 ## Motivation
 
-The simplified theory assumes a two-token vocabulary:
-
-- $t$: target token
-- $u$: non-target token
-
-For a positive sequence of length $n$:
+The June 9 meeting notes suggested repeating the same simplified experiment while training simultaneously on several lengths, such as:
 
 ```text
-t, u, u, ..., u
+10, 20, 50
 ```
 
-the last-query attention score row is assumed to have the form:
+This is the most direct next step because:
 
-```math
-S_n = (a, b, b, \ldots, b),
-\qquad
-a > b.
-```
+- it stays close to the professor's simplified model
+- it keeps the two-token setup interpretable
+- it tests a training-distribution change before adding architectural complexity
+- it connects naturally to the earlier Stage 2A/2B multi-length experiments
 
-The target-vs-non-target score margin is:
+The key hypothesis is:
 
-```math
-\Delta = a-b.
-```
-
-After applying inverse temperature $\alpha$, the theoretical target attention mass is:
-
-```math
-p_t(n)
-=
-\frac{e^{\alpha\Delta}}
-{e^{\alpha\Delta} + (n-1)}.
-```
-
-The theory predicts:
-
-- if $\alpha$ is constant, $p_t(n) \to 0$
-- if $\alpha = \log n$, the limit depends on $\Delta$
-- if $\alpha = c\log n$, the limit depends on $c\Delta$
-
-The empirical experiment should test whether this formula still describes the behavior when $a$, $b$, and $\Delta$ are produced by a trained model rather than manually assigned.
+**Multi-length training may give the optimizer stronger pressure to increase the effective learned-log exponent $c\Delta$, because the model must solve the task under more than one softmax denominator size during training.**
 
 ## Scope
 
-This is a new controlled experiment, not a replacement for Stage 1 or Stage 2B.
+This task modifies the existing Stage 3 reduced-model pipeline.
 
-The experiment should be implemented inside:
-
-```text
-infinite_generalization/
-```
-
-Recommended naming:
+Primary implementation file:
 
 ```text
-src/stage3_simplified_attention.py
+infinite_generalization/src/stage3_simplified_attention.py
 ```
 
-Recommended output directory:
+Primary report to update or extend after running:
 
 ```text
-runs/stage3_simplified_attention/
+infinite_generalization/documents/STAGE3_SIMPLIFIED_LENGTH_AWARE_ATTENTION.md
 ```
 
-The code should remain independent from the full transformer model unless a small shared utility is clearly useful.
-
-## Core Experimental Setup
-
-### Vocabulary
-
-Use exactly two tokens:
-
-- target token $t$
-- non-target token $u$
-
-Recommended token ids:
+Recommended run output directories:
 
 ```text
-t = 0
-u = 1
+runs/stage3b_single_length_learned_log
+runs/stage3b_multilength_learned_log_10_20_50
+runs/stage3b_multilength_learned_log_10_20_50_100
 ```
 
-### Input Distributions
+Do not add full transformer components in this task. Stage 3B should remain a reduced-model experiment.
 
-Use two primary classes.
+## Experimental Design
 
-Positive example:
+### Model
+
+Use the same reduced model as Stage 3:
+
+- two tokens: target $t=0$ and non-target $u=1$
+- fixed one-hot values: $t\mapsto[1,0]$, $u\mapsto[0,1]$
+- learned query projection $W_Q$
+- learned key projection $W_K$
+- values equal to one-hot inputs
+- last-query attention
+- linear classifier on the attention output
+
+Keep the target at position 0 for positives:
 
 ```text
 t, u, u, ..., u
 ```
 
-Negative example:
+Keep negatives as:
 
 ```text
 u, u, u, ..., u
 ```
 
-The first implementation should keep the target at position 0 for positive examples. This matches the theoretical setup exactly.
+This preserves the exact Stage 3 theory setup and keeps the two-score assumption easy to audit.
 
-Optional later extension:
+### Training Conditions
 
-- target near beginning
-- target near middle
-- target near end
-- random target position
+Compare at least two training conditions.
 
-Do not include these optional variants in the first implementation unless the exact-position experiment is already working.
+#### Condition A: Single-Length Baseline
 
-### Embeddings
-
-Start with fixed one-hot embeddings:
-
-```math
-t \mapsto [1,0],
-\qquad
-u \mapsto [0,1].
-```
-
-This keeps the experiment maximally close to the simplified theory.
-
-Optional later extension:
-
-- learned embeddings
-
-The first implementation should prefer fixed embeddings so that the score mechanism is easier to interpret.
-
-## Model Design
-
-The model should implement a minimal last-query attention classifier.
-
-### Input
-
-For a sequence of length $n$, the embedded input is:
-
-```math
-X_n \in \mathbb{R}^{n \times 2}.
-```
-
-Variables used here:
-
-- $n$ is sequence length.
-- $X_n$ is the embedded input matrix.
-- each row is either $[1,0]$ for $t$ or $[0,1]$ for $u$.
-
-### Query, Key, And Value
-
-Use a single attention query from the last token position.
-
-Compute:
-
-```math
-Q = X_n W_Q,
-\qquad
-K = X_n W_K,
-\qquad
-V = X_n.
-```
-
-The last query is:
-
-```math
-q_{\mathrm{last}} = Q_n.
-```
-
-Variables used here:
-
-- $W_Q$ is a learned query projection.
-- $W_K$ is a learned key projection.
-- $V=X_n$ means values are the original one-hot embeddings.
-- $q_{\mathrm{last}}$ is the query vector from the last token.
-- $Q_n$ is the query vector at the last position.
-
-Rationale:
-
-The theory reads only the last token output. Because the last token is $u$ in both positive and negative examples, the query is stable and the model must distinguish sequences through the keys.
-
-### Attention Scores
-
-For key position $j$, compute:
-
-```math
-s_j
-=
-\frac{q_{\mathrm{last}} \cdot k_j}{\sqrt{d_h}}.
-```
-
-For a positive sequence, measure:
-
-```math
-a = s_{\mathrm{target}},
-\qquad
-b = \frac{1}{n-1}\sum_{j \ne \mathrm{target}} s_j,
-\qquad
-\Delta = a-b.
-```
-
-Variables used here:
-
-- $s_j$ is the raw attention score from the last query to key position $j$.
-- $k_j$ is the key vector at position $j$.
-- $d_h$ is the key/query dimension.
-- $a$ is the target key score.
-- $b$ is the mean non-target key score.
-- $\Delta$ is the measured score margin.
-
-Also measure non-target score variation:
-
-```math
-\operatorname{std}_{j \ne \mathrm{target}}(s_j).
-```
-
-This checks whether the empirical scores really match the theoretical form:
-
-```math
-(a,b,b,\ldots,b).
-```
-
-### Length-Aware Scaling
-
-Support at least three inverse-temperature schedules:
-
-```math
-\alpha(n) = 1
-```
-
-```math
-\alpha(n) = \log n
-```
-
-```math
-\alpha(n) = c\log n
-```
-
-where $c$ can be fixed or learned.
-
-Recommended first implementation:
-
-- `constant`: $\alpha(n)=1$
-- `log`: $\alpha(n)=\log n$
-- `learned_log`: $\alpha(n)=1+\mathrm{softplus}(k_\alpha)\log(1+n)$
-
-Variables used here:
-
-- $\alpha(n)$ is the length-dependent score multiplier.
-- $c$ is a scalar coefficient.
-- $k_\alpha$ is a learned scalar parameter.
-- $\mathrm{softplus}(x)=\log(1+e^x)$, which ensures a positive learned coefficient.
-
-### Attention Weights
-
-The corrected scores are:
-
-```math
-\tilde{s}_j = \alpha(n)s_j.
-```
-
-The attention weights are:
-
-```math
-A_j
-=
-\frac{e^{\tilde{s}_j}}
-{\sum_{\ell=1}^{n} e^{\tilde{s}_\ell}}.
-```
-
-The empirical target attention mass is:
-
-```math
-p_{\mathrm{emp}}(n) = A_{\mathrm{target}}.
-```
-
-Variables used here:
-
-- $\tilde{s}_j$ is the scaled attention score.
-- $A_j$ is the attention weight assigned to key position $j$.
-- $p_{\mathrm{emp}}(n)$ is the measured target attention mass.
-
-### Attention Output
-
-Use one-hot values:
-
-```math
-V = X_n.
-```
-
-The attention output is:
-
-```math
-o(n)
-=
-\sum_{j=1}^{n} A_j V_j.
-```
-
-For a positive sequence with the target at position 0, this should be:
-
-```math
-o(n)
-=
-(p_{\mathrm{emp}}(n), 1-p_{\mathrm{emp}}(n)).
-```
-
-Variables used here:
-
-- $o(n)$ is the last-query attention output.
-- $V_j$ is the value vector at position $j$.
-- $A_j$ is the attention weight for position $j$.
-- the first coordinate is target mass because $t \mapsto [1,0]$.
-- the second coordinate is non-target mass because $u \mapsto [0,1]$.
-
-### Classifier
-
-Use a small linear classifier:
-
-```math
-z(n)
-=
-w^\top o(n) + b_{\mathrm{cls}}.
-```
-
-Variables used here:
-
-- $z(n)$ is the final binary-classification logit.
-- $w$ is a learned classifier weight vector.
-- $b_{\mathrm{cls}}$ is a learned classifier bias.
-- $o(n)$ is the attention output.
-
-Prediction rule:
-
-```math
-\hat{y}=1
-\quad
-\text{if}
-\quad
-z(n) \ge 0.
-```
-
-## Training Setup
-
-### Training Lengths
-
-Start with fixed short-length training:
+Train only at length 10:
 
 ```text
-train_length = 10
+train_lengths = [10]
 ```
 
-Optional second condition:
+This reproduces the Stage 3 setup.
+
+#### Condition B: Multi-Length Training
+
+Train on several short lengths:
+
+```text
+train_lengths = [10, 20, 50]
+```
+
+Optional additional condition:
 
 ```text
 train_lengths = [10, 20, 50, 100]
 ```
 
-The first goal is to understand the fixed-length case.
-
-### Evaluation Lengths
-
-Evaluate on a broad length sweep:
+The first implementation should support arbitrary training-length lists through a command-line option:
 
 ```text
-10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000
+--train-lengths 10 20 50
 ```
 
-Optional extension:
+### Alpha Modes
+
+The primary mode for Stage 3B is:
 
 ```text
-20000, 50000, 100000
+learned_log
 ```
 
-Only add very long lengths after the basic experiment is working.
-
-### Loss
-
-Use binary cross entropy with logits:
+because the main question is whether training reaches:
 
 ```math
-L(y,z)
-=
--
-y\log\sigma(z)
--
-(1-y)\log(1-\sigma(z)).
+c\Delta>1.
 ```
 
-Variables used here:
+Optional controls:
 
-- $L$ is the loss.
-- $y$ is the true label.
-- $z$ is the final logit.
-- $\sigma(z)$ is the sigmoid probability.
+- `constant`: should still fail asymptotically because $\Delta$ remains fixed.
+- `log`: should succeed if $\Delta>1$.
 
-## Theoretical Prediction To Compare Against
+These controls are useful but secondary. Do not let them delay the primary learned-log comparison.
 
-For each positive evaluation example, compute the empirical margin:
+### Fairness: Match Optimizer Updates
 
-```math
-\Delta_{\mathrm{emp}}(n)
-=
-a(n)-b(n).
+Multi-length training can change the number of optimizer updates per epoch. Therefore, comparisons should not rely only on epoch count.
+
+Add or use a way to control the total optimizer update budget.
+
+Recommended option:
+
+```text
+--max-train-steps 6400
 ```
 
-Then compute the theory-predicted target attention mass:
+Expected behavior:
 
-```math
-p_{\mathrm{theory}}(n)
-=
-\frac{e^{\alpha(n)\Delta_{\mathrm{emp}}(n)}}
-{e^{\alpha(n)\Delta_{\mathrm{emp}}(n)} + (n-1)}.
+- if `--max-train-steps` is provided, stop training after that many optimizer updates
+- if it is not provided, keep the existing epoch-based behavior
+
+This allows fair comparisons such as:
+
+```text
+single length, 6400 updates
+multi length, 6400 updates
 ```
 
-Variables used here:
+If adding `--max-train-steps` is too disruptive, document the exact number of optimizer updates for every run and compare runs with similar update counts.
 
-- $\Delta_{\mathrm{emp}}(n)$ is the measured target-vs-mean-non-target score margin.
-- $p_{\mathrm{theory}}(n)$ is the theoretical prediction using the measured margin.
-- $\alpha(n)$ is the same length-dependent scale used by the model.
+## Training Data Construction
 
-Also compute a fixed-margin theory curve using the training-length margin:
+For each training length, build a balanced dataset:
 
-```math
-p_{\mathrm{theory,train}}(n)
-=
-\frac{e^{\alpha(n)\Delta_{\mathrm{train}}}}
-{e^{\alpha(n)\Delta_{\mathrm{train}}} + (n-1)}.
+- half positive examples
+- half negative examples
+
+For multi-length training, use one of these approaches.
+
+Recommended approach:
+
+**Concatenate balanced datasets from each training length and shuffle the combined dataset.**
+
+This is simple and makes each training length equally represented per epoch.
+
+Alternative approach:
+
+**Cycle separate dataloaders by length until all requested optimizer steps are consumed.**
+
+This gives more explicit length control but is more code.
+
+For the first Stage 3B implementation, concatenation is sufficient.
+
+## Evaluation Lengths
+
+Evaluate on the same long sweep used in the latest Stage 3 analysis:
+
+```text
+10, 100, 1000, 10000, 100000, 1000000, 5000000, 10000000
 ```
 
-Variables used here:
+Keep evaluation examples small enough for long lengths to be practical.
 
-- $\Delta_{\mathrm{train}}$ is the measured margin at training length.
-- This curve tests whether the model learned an approximately fixed margin.
+Recommended defaults:
+
+```text
+test_examples = 50
+eval_batch_size = 16
+```
+
+These are sufficient for mechanism-level metrics because this reduced dataset is deterministic and highly controlled.
 
 ## Metrics To Save
 
-Save a CSV such as:
+Keep all current Stage 3 metrics.
 
-```text
-runs/stage3_simplified_attention/metrics_by_length.csv
-```
-
-Required columns:
+Required columns in `metrics_by_length.csv`:
 
 - `length`
 - `split`
 - `alpha_mode`
+- `alpha_value`
 - `accuracy`
 - `positive_accuracy`
 - `negative_accuracy`
@@ -477,267 +237,256 @@ Required columns:
 - `mean_theory_target_attention_using_empirical_delta`
 - `mean_theory_target_attention_using_train_delta`
 - `mean_attention_absolute_error_empirical_vs_theory`
-
-Recommended additional columns:
-
 - `learned_alpha_coefficient`
 - `classifier_weight_target_coord`
 - `classifier_weight_non_target_coord`
 - `classifier_bias`
 
-Coordinate convention:
+Add these Stage 3B metadata columns if practical:
 
-- target coordinate means the first coordinate because $t=0$ and $t \mapsto [1,0]$.
-- non-target coordinate means the second coordinate because $u=1$ and $u \mapsto [0,1]$.
+- `train_lengths`
+- `train_length_count`
+- `optimizer_updates`
+- `examples_per_train_length`
 
-## Figures To Produce
+If adding them to every row is inconvenient, save them clearly in `config.json`.
 
-Create figures under:
+## Key Derived Quantities
 
-```text
-infinite_generalization/documents/figures/
-```
-
-or run-specific figures under:
-
-```text
-runs/stage3_simplified_attention/figures/
-```
-
-Required figures:
-
-### 1. Theory vs Empirical Target Attention
-
-Plot by length:
-
-- empirical target attention mass
-- theory prediction using empirical $\Delta(n)$
-- theory prediction using training-length $\Delta_{\mathrm{train}}$
-
-Expected file:
-
-```text
-stage3_theory_vs_empirical_attention.png
-```
-
-### 2. Measured Margin By Length
-
-Plot:
+For learned-log runs, compute and report:
 
 ```math
-\Delta_{\mathrm{emp}}(n)
+c\Delta.
 ```
 
-by length.
-
-Expected file:
+Use:
 
 ```text
-stage3_delta_by_length.png
+c = learned_alpha_coefficient
+Delta = mean_delta
 ```
 
-### 3. Non-Target Score Variation
+The most important comparison is:
 
-Plot:
+| Condition | Updates | $c$ | $\Delta$ | $c\Delta$ | Positive logit at 10M | Positive accuracy at 10M |
+|---|---:|---:|---:|---:|---:|---:|
+| single length | TBD | TBD | TBD | TBD | TBD | TBD |
+| multi length | TBD | TBD | TBD | TBD | TBD | TBD |
+
+## Main Questions To Answer
+
+### 1. Does Multi-Length Training Increase $c\Delta$?
+
+Compare:
+
+- learned $c$
+- learned $\Delta$
+- product $c\Delta$
+
+The key threshold is:
 
 ```math
-\operatorname{std}_{j \ne \mathrm{target}}(s_j)
+c\Delta>1.
 ```
 
-by length.
+### 2. Does Multi-Length Training Reach The Threshold With Fewer Updates?
 
-Expected file:
+Compare update-matched runs.
 
-```text
-stage3_non_target_score_std.png
+Example:
+
+- single-length learned-log at 1600, 3200, 6400 updates
+- multi-length learned-log at 1600, 3200, 6400 updates
+
+The strongest result would be:
+
+**Multi-length training crosses $c\Delta>1$ with fewer optimizer updates than single-length training.**
+
+### 3. Does The Two-Score Assumption Still Hold?
+
+Check:
+
+```math
+\operatorname{std}_{j\ne t}(s_j)=0.
 ```
 
-This checks whether the exact theory assumption $(a,b,b,\ldots,b)$ is actually satisfied.
+Expected result:
 
-### 4. Accuracy And Logit By Length
+It should remain exactly 0.0 because all non-target tokens are identical and use fixed one-hot values.
 
-Plot:
+If it does not remain zero, inspect the implementation.
 
-- accuracy by length
-- positive logit by length
-- negative logit by length
+### 4. Does The Closed-Form Attention Formula Still Match?
 
-Expected file:
+This is a secondary check.
 
-```text
-stage3_accuracy_and_logits.png
+Once the two-score assumption holds, empirical target attention should match:
+
+```math
+p_t(n)
+=
+\frac{e^{\alpha\Delta}}
+{e^{\alpha\Delta}+(n-1)}.
 ```
 
-## Expected Outcomes
+The more important question is whether training reaches a better $c\Delta$ regime.
 
-### Case 1: Theory Matches Practice
+### 5. Does Positive Logit Stay Stable At Very Long Lengths?
 
-The theory is strongly supported if:
+Track:
 
-- non-target score standard deviation is near zero
-- measured $\Delta(n)$ is approximately stable across length
-- empirical target attention matches $p_{\mathrm{theory}}(n)$
-- classification behavior changes exactly when target attention becomes too small
+- target attention mass
+- positive logit
+- positive accuracy
 
-Interpretation:
-
-The simplified model accurately explains the learned model because the learned model preserves the two-score structure assumed by the theory.
-
-### Case 2: Theory Partially Matches Practice
-
-The theory is partially supported if:
-
-- empirical attention follows the theoretical trend
-- but $\Delta(n)$ changes with length
-- or non-target scores are not exactly equal
-- or classifier behavior depends on more than target attention mass
-
-Interpretation:
-
-The softmax denominator mechanism is real, but the learned model introduces additional effects.
-
-### Case 3: Theory Does Not Match Practice
-
-The theory fails for this exact trained model if:
-
-- empirical target attention is far from the theoretical prediction
-- non-target scores vary strongly
-- the learned query/key system does not produce the assumed $(a,b,b,\ldots,b)$ structure
-- classification succeeds or fails for reasons unrelated to target attention mass
-
-Interpretation:
-
-The theoretical formula may still be mathematically correct, but the trained model does not realize the assumptions needed for the formula to describe its behavior.
+The model may have high target attention but still fail if the final classifier is poorly calibrated. Save classifier weights to diagnose this.
 
 ## Implementation Steps
 
-### Step 1: Add The Stage 3 Script
+### Step 1: Add Multi-Length Training Support
 
-Create:
-
-```text
-src/stage3_simplified_attention.py
-```
-
-The script should:
-
-- parse command-line arguments
-- create train/eval datasets
-- define the simplified attention model
-- train the model
-- evaluate by length
-- save CSV metrics
-- save figures when `matplotlib` is available
-
-### Step 2: Implement The Dataset
-
-Add a small local dataset generator inside the Stage 3 script unless reuse is clearly cleaner.
-
-Requirements:
-
-- generate positives as `[t, u, ..., u]`
-- generate negatives as `[u, u, ..., u]`
-- balance positives and negatives
-- support deterministic seeds
-- support arbitrary sequence lengths
-
-### Step 3: Implement The Model
-
-The first model should use:
-
-- fixed one-hot token embeddings
-- learned $W_Q$
-- learned $W_K$
-- values equal to one-hot embeddings
-- last-query attention
-- one linear classifier
-
-The model forward pass should optionally return analysis details:
-
-- raw scores
-- corrected scores
-- attention weights
-- target score
-- non-target scores
-- margin
-- attention output
-- final logit
-
-### Step 4: Train And Evaluate
-
-Train on length 10 first.
-
-Evaluate on:
+Modify `stage3_simplified_attention.py` to accept:
 
 ```text
-10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000
+--train-lengths 10 20 50
 ```
 
-Run at least:
+Behavior:
 
-- constant $\alpha$
-- $\alpha=\log n$
-- learned log scale
+- if `--train-lengths` is omitted, default to the existing single `train_length`
+- if provided, use the list as the training lengths
+- keep backward compatibility with `--train-length`
 
-### Step 5: Compare Theory And Practice
+### Step 2: Build Multi-Length Training Data
 
-For each length:
+For each training length:
 
-1. Measure empirical target attention mass.
-2. Measure $a$, $b$, and $\Delta$.
-3. Compute theory prediction using empirical $\Delta(n)$.
-4. Compute theory prediction using training-length $\Delta_{\mathrm{train}}$.
-5. Save the absolute difference between empirical and theory attention.
+1. generate balanced examples
+2. concatenate all examples
+3. shuffle deterministically
+4. train with the existing DataLoader path
 
-### Step 6: Document Results
+Save the training lengths in `config.json`.
 
-After running the experiment, add a new report:
+### Step 3: Add Optional Update-Budget Control
+
+Add:
 
 ```text
-documents/STAGE3_SIMPLIFIED_ATTENTION_EMPIRICAL_ANALYSIS.md
+--max-train-steps
 ```
 
-The report should answer:
+Behavior:
 
-- Did the learned model produce the assumed score structure $(a,b,b,\ldots,b)$?
-- Did empirical target attention match the theoretical formula?
-- Did $\alpha=\log n$ behave according to the learned $\Delta$?
-- Did learned log scaling increase the effective margin enough?
-- What does this imply for Stage 2B?
+- train until the step budget is reached
+- allow the dataloader to restart across epochs if needed
+- save the actual number of optimizer updates
 
-## Smoke Test Requirements
+This makes single-length and multi-length runs comparable.
 
-Add or run a small smoke test that verifies:
+### Step 4: Run A Smoke Test
 
-- the script runs with very few steps
-- output CSV is created
-- evaluation includes at least two lengths
-- theory and empirical attention columns are present
-- no NaN values appear in saved metrics
-
-Recommended command:
+Run a tiny multi-length smoke test:
 
 ```text
-$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --smoke-test
+$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --smoke-test --alpha-mode learned_log --train-lengths 10 20
 ```
 
-Use the exact command style already used in `README.md` if different.
+Expected:
+
+- script exits successfully
+- `metrics_by_length.csv` is created
+- `config.json` records multiple train lengths
+- no NaN appears in key metrics
+
+### Step 5: Run Primary Experiments
+
+Recommended primary runs:
+
+```text
+$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --alpha-mode learned_log --train-lengths 10 --max-train-steps 1600 --output-dir runs/stage3b_single_length_learned_log_steps1600
+```
+
+```text
+$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --alpha-mode learned_log --train-lengths 10 20 50 --max-train-steps 1600 --output-dir runs/stage3b_multilength_learned_log_10_20_50_steps1600
+```
+
+Repeat for:
+
+```text
+3200, 6400
+```
+
+Optional extended run:
+
+```text
+12800
+```
+
+### Step 6: Analyze Results
+
+Create or update a Stage 3B analysis section in:
+
+```text
+documents/STAGE3_SIMPLIFIED_LENGTH_AWARE_ATTENTION.md
+```
+
+The analysis should answer:
+
+- Does multi-length training increase $c$?
+- Does it increase $\Delta$?
+- Does it increase $c\Delta$?
+- Does it cross $c\Delta>1$ earlier?
+- Does it improve positive logit at 10M?
+- Does it preserve the two-score assumption?
+
+## Expected Outcomes
+
+### Outcome A: Multi-Length Helps
+
+If multi-length training reaches $c\Delta>1$ with fewer updates, then:
+
+**Multi-length training improves optimization toward the asymptotic regime in the reduced model.**
+
+This would support trying analogous length-diverse training in fuller transformer settings.
+
+### Outcome B: Multi-Length Does Not Help
+
+If multi-length and single-length training have similar $c\Delta$ at matched update budgets, then:
+
+**The reduced model may already get enough length information from length 10, and optimization strength may matter more than length diversity.**
+
+This would suggest focusing on architecture or classifier changes rather than only training distribution.
+
+### Outcome C: Multi-Length Hurts
+
+If multi-length training reduces $c\Delta$ or hurts long-length logits, then:
+
+**The mixed training distribution may make optimization harder or change classifier calibration.**
+
+Inspect:
+
+- learned $c$
+- learned $\Delta$
+- classifier weights
+- target attention mass by length
+- positive logits by length
 
 ## Success Criteria
 
 This task is complete when:
 
-- the simplified trainable attention model is implemented
-- the model can train and evaluate on controlled two-token data
-- length-sweep metrics are saved to CSV
-- theory-vs-empirical attention figures are generated
-- the result clearly states whether the theory matches practice
-- the connection to Stage 2B is documented without overclaiming
+- `stage3_simplified_attention.py` supports multi-length training
+- smoke test passes for at least two training lengths
+- update-matched single-length and multi-length learned-log runs are completed
+- metrics include enough information to compute $c\Delta$
+- the report states whether multi-length training helps reach $c\Delta>1$
+- the conclusion does not overclaim beyond the reduced-model setting
 
-## Notes And Risks
+## Risks And Notes
 
-- If embeddings are learned, the model may no longer exactly match the professor's setup. Use fixed one-hot embeddings first.
-- If the classifier learns to ignore the target-attention coordinate, accuracy may not reflect attention behavior. Save classifier weights.
-- If non-target scores are not equal, the simple formula using mean $b$ is only an approximation. Save non-target score standard deviation.
-- If $\Delta$ changes with length, the fixed-margin theory curve may not match, but the empirical-margin theory curve may still match.
-- This experiment validates the simplified mechanism, not the full transformer.
+- Do not interpret finite-length success as infinite-length success unless $c\Delta>1$.
+- Keep the target at position 0 for this task; target-anywhere is a separate follow-up.
+- Keep fixed one-hot values; learned embeddings are a separate follow-up.
+- If multi-length training changes the number of updates per epoch, use update-matched comparisons.
+- The result applies only to the reduced model unless later experiments show the full transformer preserves an analogous score pattern.
