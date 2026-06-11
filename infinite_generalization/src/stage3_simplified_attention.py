@@ -660,6 +660,32 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
         json.dump(data, json_file, indent=2)
 
 
+def save_model_checkpoint(
+    path: Path,
+    *,
+    model: SimplifiedLastQueryAttentionClassifier,
+    config: Stage3Config,
+    optimizer_updates: int,
+) -> None:
+    """Save a trained Stage 3 model checkpoint for mechanism analysis."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "d_head": config.d_head,
+            "alpha_mode": config.alpha_mode,
+            "alpha_log_scale_init": config.alpha_log_scale_init,
+            "train_length": config.train_length,
+            "train_lengths": list(resolved_train_lengths(config)),
+            "optimizer_updates": optimizer_updates,
+            "target_token_id": TARGET_TOKEN_ID,
+            "non_target_token_id": NON_TARGET_TOKEN_ID,
+        },
+        path,
+    )
+
+
 def write_figures(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     """Write diagnostic figures when matplotlib is available."""
 
@@ -866,6 +892,12 @@ def main() -> None:
     train_lengths = resolved_train_lengths(config)
 
     model, optimizer_updates = train_model(config, device=device, output_dir=output_dir)
+    save_model_checkpoint(
+        output_dir / "model.pt",
+        model=model,
+        config=config,
+        optimizer_updates=optimizer_updates,
+    )
     write_json(
         output_dir / "config.json",
         {
