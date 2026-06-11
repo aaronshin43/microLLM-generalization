@@ -409,6 +409,65 @@ Interpretation:
 
 The trained reduced architecture satisfies the required score pattern: one target score $a$ and one shared non-target score $b$. Therefore the empirical target attention naturally follows the closed-form formula.
 
+## Weight-Level Mechanism
+
+The simplest model can be interpreted directly from its learned query and key projections. This section summarizes the mechanism; for the full step-by-step calculation from $W_Q$ and $W_K$ to $\Delta$, see `STAGE3_WEIGHT_LEVEL_MECHANISM.md`.
+
+Because positive inputs always end with the non-target token $u$, the final query is:
+
+```math
+q_{\mathrm{last}}=q_u.
+```
+
+The target and non-target key vectors are:
+
+```math
+k_t=W_Kx_t,
+\qquad
+k_u=W_Kx_u.
+```
+
+The model creates $a>b$ when:
+
+```math
+\Delta
+=
+a-b
+=
+\frac{q_u^\top(k_t-k_u)}{\sqrt{d}}
+>
+0.
+```
+
+The mechanism is therefore simple: $q_u$ must align positively with the target-vs-non-target key difference $k_t-k_u$.
+
+This raw margin is the same $\Delta$ that enters the target-attention formula:
+
+```math
+p_t(n)
+=
+\frac{e^{\alpha\Delta}}
+{e^{\alpha\Delta}+(n-1)}.
+```
+
+For the rerun `learned_log_e200` checkpoint, the direct weight-level calculation produced:
+
+| Quantity | Value |
+|---|---:|
+| $a=q_u^\top k_t/\sqrt{d}$ | 4.1900 |
+| $b=q_u^\top k_u/\sqrt{d}$ | -4.1171 |
+| $\Delta=a-b$ | 8.3072 |
+| recorded `mean_delta` from the rerun | 8.3072 |
+
+The component-wise margin decomposition was:
+
+| Dimension | $q_u$ | $k_t-k_u$ | contribution to $\Delta$ |
+|---:|---:|---:|---:|
+| 0 | 2.1707 | 3.1037 | 4.7638 |
+| 1 | 1.8260 | 2.7442 | 3.5433 |
+
+Both dimensions contribute positively. The final non-target query points in a direction that strongly aligns with the target-minus-non-target key difference. This directly explains why the target key receives a larger raw score than the non-target key, producing the two-score pattern $S_n=(a,b,b,\ldots,b)$ with $a>b$.
+
 ## Overall Results
 
 Negative examples were classified correctly in every analyzed run and length, so the table reports positive accuracy at length 10M.
