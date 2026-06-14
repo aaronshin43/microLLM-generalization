@@ -32,6 +32,7 @@ class Stage3Config:
     alpha_mode: str = "constant"
     train_length: int = 10
     train_lengths: tuple[int, ...] = ()
+    target_position_mode: str = "fixed_start"
     train_examples: int = 2_000
     val_examples: int = 500
     test_examples: int = 50
@@ -71,6 +72,12 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=None,
         help="Training lengths. If omitted, --train-length is used.",
+    )
+    parser.add_argument(
+        "--target-position-mode",
+        choices=("fixed_start", "nonfinal_random"),
+        default=Stage3Config.target_position_mode,
+        help="Positive target placement mode.",
     )
     parser.add_argument("--train-examples", type=int, default=Stage3Config.train_examples)
     parser.add_argument("--val-examples", type=int, default=Stage3Config.val_examples)
@@ -121,6 +128,8 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         raise ValueError("All training lengths must be at least 2.")
     if args.max_train_steps is not None and args.max_train_steps < 1:
         raise ValueError("--max-train-steps must be positive when provided.")
+    if args.target_position_mode not in {"fixed_start", "nonfinal_random"}:
+        raise ValueError(f"Unsupported target position mode: {args.target_position_mode}")
 
     config = Stage3Config(
         seed=args.seed,
@@ -129,6 +138,7 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         alpha_mode=args.alpha_mode,
         train_length=args.train_length,
         train_lengths=train_lengths,
+        target_position_mode=args.target_position_mode,
         train_examples=args.train_examples,
         val_examples=args.val_examples,
         test_examples=args.test_examples,
@@ -153,6 +163,7 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         alpha_mode=config.alpha_mode,
         train_length=10,
         train_lengths=config.train_lengths,
+        target_position_mode=config.target_position_mode,
         train_examples=64,
         val_examples=32,
         test_examples=40,
@@ -191,10 +202,11 @@ def make_two_token_dataset(
     length: int,
     examples: int,
     seed: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
+    target_position_mode: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Create a balanced two-token target-presence dataset.
 
-    Positive examples are [t, u, ..., u]. Negative examples are [u, u, ..., u].
+    Positive examples contain exactly one target. Negative examples are all non-target.
     The token id convention is t=0 and u=1.
     """
 
@@ -205,25 +217,45 @@ def make_two_token_dataset(
 
     positive_count = examples // 2
     negative_count = examples - positive_count
+    generator = torch.Generator().manual_seed(seed)
 
     positive_inputs = torch.full((positive_count, length), NON_TARGET_TOKEN_ID, dtype=torch.long)
-    positive_inputs[:, TARGET_POSITION] = TARGET_TOKEN_ID
+    if target_position_mode == "fixed_start":
+        positive_target_positions = torch.full(
+            (positive_count,),
+            TARGET_POSITION,
+            dtype=torch.long,
+        )
+    elif target_position_mode == "nonfinal_random":
+        positive_target_positions = torch.randint(
+            low=0,
+            high=length - 1,
+            size=(positive_count,),
+            generator=generator,
+            dtype=torch.long,
+        )
+    else:
+        raise ValueError(f"Unsupported target_position_mode: {target_position_mode}")
+
+    positive_inputs[torch.arange(positive_count), positive_target_positions] = TARGET_TOKEN_ID
     positive_labels = torch.ones(positive_count, dtype=torch.float32)
 
     negative_inputs = torch.full((negative_count, length), NON_TARGET_TOKEN_ID, dtype=torch.long)
     negative_labels = torch.zeros(negative_count, dtype=torch.float32)
+    negative_target_positions = torch.full((negative_count,), -1, dtype=torch.long)
 
     inputs = torch.cat([positive_inputs, negative_inputs], dim=0)
     labels = torch.cat([positive_labels, negative_labels], dim=0)
+    target_positions = torch.cat([positive_target_positions, negative_target_positions], dim=0)
 
-    generator = torch.Generator().manual_seed(seed)
     permutation = torch.randperm(examples, generator=generator)
-    return inputs[permutation], labels[permutation]
+    return inputs[permutation], labels[permutation], target_positions[permutation]
 
 
 def make_loader(
     inputs: torch.Tensor,
     labels: torch.Tensor,
+    target_positions: torch.Tensor,
     *,
     batch_size: int,
     shuffle: bool,
@@ -233,11 +265,17 @@ def make_loader(
 
     generator = torch.Generator().manual_seed(seed)
     return DataLoader(
-        TensorDataset(inputs, labels),
+        TensorDataset(inputs, labels, target_positions),
         batch_size=batch_size,
         shuffle=shuffle,
         generator=generator if shuffle else None,
     )
+
+
+def unpack_batch(batch: tuple[torch.Tensor, ...]) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return tokens and labels from a Stage 3 batch."""
+
+    return batch[0], batch[1]
 
 
 def resolved_train_lengths(config: Stage3Config) -> tuple[int, ...]:
@@ -250,6 +288,7 @@ def make_multilength_loaders(
     *,
     lengths: tuple[int, ...],
     examples_per_length: int,
+    target_position_mode: str,
     batch_size: int,
     shuffle: bool,
     seed: int,
@@ -263,15 +302,17 @@ def make_multilength_loaders(
 
     loaders: list[DataLoader] = []
     for offset, length in enumerate(lengths):
-        inputs, labels = make_two_token_dataset(
+        inputs, labels, target_positions = make_two_token_dataset(
             length=length,
             examples=examples_per_length,
             seed=seed + offset,
+            target_position_mode=target_position_mode,
         )
         loaders.append(
             make_loader(
                 inputs,
                 labels,
+                target_positions,
                 batch_size=batch_size,
                 shuffle=shuffle,
                 seed=seed + 10_000 + offset,
@@ -419,7 +460,8 @@ def run_epoch(
     all_logits: list[torch.Tensor] = []
     all_labels: list[torch.Tensor] = []
 
-    for tokens, labels in loader:
+    for batch in loader:
+        tokens, labels = unpack_batch(batch)
         tokens = tokens.to(device)
         labels = labels.to(device)
 
@@ -471,10 +513,11 @@ def run_loaders_once(
     all_logits: list[torch.Tensor] = []
     all_labels: list[torch.Tensor] = []
 
-    for tokens, labels in batches:
+    for batch in batches:
         if is_training and max_steps is not None and update_count >= max_steps:
             break
 
+        tokens, labels = unpack_batch(batch)
         tokens = tokens.to(device)
         labels = labels.to(device)
 
@@ -502,6 +545,57 @@ def run_loaders_once(
     return total_loss / total_examples, binary_accuracy(logits_cpu, labels_cpu), update_count
 
 
+def target_position_bucket(position: int, length: int) -> str:
+    """Map a non-final target position to a coarse position bucket."""
+
+    nonfinal_count = length - 1
+    if position < 0 or position >= nonfinal_count:
+        raise ValueError(f"Target position must be in [0, {nonfinal_count - 1}].")
+
+    if position < nonfinal_count / 3:
+        return "beginning"
+    if position < 2 * nonfinal_count / 3:
+        return "middle"
+    return "end_nonfinal"
+
+
+def summarize_position_buckets(
+    *,
+    length: int,
+    target_position_mode: str,
+    target_positions: torch.Tensor,
+    positive_correct: torch.Tensor,
+    target_attentions: torch.Tensor,
+    deltas: torch.Tensor,
+    non_target_stds: torch.Tensor,
+) -> list[dict[str, float | int | str]]:
+    """Summarize positive examples by target-position bucket."""
+
+    rows: list[dict[str, float | int | str]] = []
+    buckets = [target_position_bucket(int(position), length) for position in target_positions]
+    for bucket in ("beginning", "middle", "end_nonfinal"):
+        mask = torch.tensor([value == bucket for value in buckets], dtype=torch.bool)
+        if not mask.any():
+            continue
+        positions = target_positions[mask]
+        rows.append(
+            {
+                "length": length,
+                "target_position_mode": target_position_mode,
+                "bucket": bucket,
+                "positive_examples": int(mask.sum().item()),
+                "positive_accuracy": positive_correct[mask].float().mean().item(),
+                "mean_empirical_target_attention": target_attentions[mask].mean().item(),
+                "mean_delta": deltas[mask].mean().item(),
+                "mean_non_target_score_std": non_target_stds[mask].mean().item(),
+                "min_target_position": int(positions.min().item()),
+                "max_target_position": int(positions.max().item()),
+                "final_target_count": int(positions.eq(length - 1).sum().item()),
+            }
+        )
+    return rows
+
+
 @torch.no_grad()
 def evaluate_length(
     model: SimplifiedLastQueryAttentionClassifier,
@@ -510,12 +604,25 @@ def evaluate_length(
     examples: int,
     batch_size: int,
     seed: int,
+    target_position_mode: str,
     device: torch.device,
-) -> dict[str, float | int | str]:
+) -> tuple[dict[str, float | int | str], list[dict[str, float | int | str]]]:
     """Evaluate one length and collect mechanism metrics."""
 
-    inputs, labels = make_two_token_dataset(length=length, examples=examples, seed=seed)
-    loader = make_loader(inputs, labels, batch_size=batch_size, shuffle=False, seed=seed)
+    inputs, labels, target_positions = make_two_token_dataset(
+        length=length,
+        examples=examples,
+        seed=seed,
+        target_position_mode=target_position_mode,
+    )
+    loader = make_loader(
+        inputs,
+        labels,
+        target_positions,
+        batch_size=batch_size,
+        shuffle=False,
+        seed=seed,
+    )
 
     model.eval()
     all_logits: list[torch.Tensor] = []
@@ -531,10 +638,13 @@ def evaluate_length(
     empirical_attentions: list[torch.Tensor] = []
     empirical_theory_attentions: list[torch.Tensor] = []
     alpha_values: list[torch.Tensor] = []
+    positive_target_positions: list[torch.Tensor] = []
+    positive_correct_values: list[torch.Tensor] = []
 
-    for tokens, batch_labels in loader:
+    for tokens, batch_labels, batch_target_positions in loader:
         tokens = tokens.to(device)
         batch_labels = batch_labels.to(device)
+        batch_target_positions = batch_target_positions.to(device)
         logits, details = model(tokens, return_details=True)
         probabilities = torch.sigmoid(logits)
 
@@ -553,11 +663,22 @@ def evaluate_length(
             raw_scores = details["raw_scores"][positive_mask]
             attention_weights = details["attention_weights"][positive_mask]
             alpha = details["alpha"][positive_mask]
-            target_score = raw_scores[:, TARGET_POSITION]
-            non_target_scores = raw_scores[:, 1:]
+            target_position = batch_target_positions[positive_mask]
+            if target_position.eq(length - 1).any():
+                raise RuntimeError("Positive examples must not place the target at final position.")
+            target_score = raw_scores.gather(1, target_position.unsqueeze(1)).squeeze(1)
+            non_target_mask = torch.ones_like(raw_scores, dtype=torch.bool)
+            non_target_mask.scatter_(1, target_position.unsqueeze(1), False)
+            non_target_scores = raw_scores[non_target_mask].view(
+                raw_scores.shape[0],
+                length - 1,
+            )
             non_target_mean = non_target_scores.mean(dim=1)
             delta = target_score - non_target_mean
-            empirical_attention = attention_weights[:, TARGET_POSITION]
+            empirical_attention = attention_weights.gather(
+                1,
+                target_position.unsqueeze(1),
+            ).squeeze(1)
             theory_attention = target_attention_theory(
                 length=length,
                 alpha=alpha,
@@ -571,6 +692,8 @@ def evaluate_length(
             empirical_attentions.append(empirical_attention.cpu())
             empirical_theory_attentions.append(theory_attention.cpu())
             alpha_values.append(alpha.cpu())
+            positive_target_positions.append(target_position.cpu())
+            positive_correct_values.append(logits[positive_mask].ge(0).cpu())
 
     logits_cpu = torch.cat(all_logits)
     labels_cpu = torch.cat(all_labels)
@@ -587,14 +710,17 @@ def evaluate_length(
     empirical_attentions_cpu = torch.cat(empirical_attentions)
     empirical_theory_attentions_cpu = torch.cat(empirical_theory_attentions)
     alpha_values_cpu = torch.cat(alpha_values)
+    positive_target_positions_cpu = torch.cat(positive_target_positions)
+    positive_correct_cpu = torch.cat(positive_correct_values)
 
     attention_abs_error = (empirical_attentions_cpu - empirical_theory_attentions_cpu).abs()
     classifier_weight = model.classifier.weight.detach().cpu().squeeze(0)
 
-    return {
+    row = {
         "length": length,
         "split": "test",
         "alpha_mode": model.alpha_mode,
+        "target_position_mode": target_position_mode,
         "alpha_value": alpha_values_cpu.mean().item(),
         "accuracy": metrics["accuracy"],
         "positive_accuracy": metrics["positive_accuracy"],
@@ -618,6 +744,16 @@ def evaluate_length(
         "classifier_weight_non_target_coord": classifier_weight[1].item(),
         "classifier_bias": model.classifier.bias.detach().cpu().item(),
     }
+    position_rows = summarize_position_buckets(
+        length=length,
+        target_position_mode=target_position_mode,
+        target_positions=positive_target_positions_cpu,
+        positive_correct=positive_correct_cpu,
+        target_attentions=empirical_attentions_cpu,
+        deltas=deltas_cpu,
+        non_target_stds=non_target_stds_cpu,
+    )
+    return row, position_rows
 
 
 def add_train_delta_theory(
@@ -681,6 +817,8 @@ def save_model_checkpoint(
             "optimizer_updates": optimizer_updates,
             "target_token_id": TARGET_TOKEN_ID,
             "non_target_token_id": NON_TARGET_TOKEN_ID,
+            "target_position_mode": config.target_position_mode,
+            "final_target_allowed": False,
         },
         path,
     )
@@ -804,6 +942,7 @@ def train_model(
     train_loaders = make_multilength_loaders(
         lengths=train_lengths,
         examples_per_length=config.train_examples,
+        target_position_mode=config.target_position_mode,
         batch_size=config.batch_size,
         shuffle=True,
         seed=config.seed + 1,
@@ -811,6 +950,7 @@ def train_model(
     val_loaders = make_multilength_loaders(
         lengths=train_lengths,
         examples_per_length=config.val_examples,
+        target_position_mode=config.target_position_mode,
         batch_size=config.eval_batch_size,
         shuffle=False,
         seed=config.seed + 2,
@@ -910,19 +1050,28 @@ def main() -> None:
             "resolved_device": str(device),
             "target_token_id": TARGET_TOKEN_ID,
             "non_target_token_id": NON_TARGET_TOKEN_ID,
+            "target_position_mode": config.target_position_mode,
+            "final_target_allowed": False,
         },
     )
 
-    rows = [
+    evaluation_results = [
         evaluate_length(
             model,
             length=length,
             examples=config.test_examples,
             batch_size=config.eval_batch_size,
             seed=config.seed + 10_000 + length,
+            target_position_mode=config.target_position_mode,
             device=device,
         )
         for length in config.eval_lengths
+    ]
+    rows = [row for row, _ in evaluation_results]
+    target_position_rows = [
+        position_row
+        for _, position_rows in evaluation_results
+        for position_row in position_rows
     ]
     add_train_delta_theory(rows, train_length=train_lengths[0])
     for row in rows:
@@ -930,7 +1079,16 @@ def main() -> None:
         row["train_length_count"] = len(train_lengths)
         row["optimizer_updates"] = optimizer_updates
         row["examples_per_train_length"] = config.train_examples
+        row["final_target_allowed"] = False
+    for row in target_position_rows:
+        row["train_lengths"] = " ".join(str(length) for length in train_lengths)
+        row["train_length_count"] = len(train_lengths)
+        row["optimizer_updates"] = optimizer_updates
+        row["examples_per_train_length"] = config.train_examples
+        row["final_target_allowed"] = False
     write_csv(output_dir / "metrics_by_length.csv", rows)
+    if target_position_rows:
+        write_csv(output_dir / "target_position_metrics.csv", target_position_rows)
     write_figures(output_dir, rows)
 
     print(f"Wrote outputs to: {output_dir}")

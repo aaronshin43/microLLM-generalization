@@ -668,6 +668,18 @@ Therefore:
 
 **Stage 3B is evidence against the hypothesis that multi-length training alone makes the learned-log asymptotic regime easier to reach.**
 
+## Stage 3C: Target Can Appear Anywhere
+
+Stage 3C tested whether the reduced model still works when the target can appear at any non-final position. The final token was kept as the non-target token, so the readout query remained the non-target query.
+
+The result was position-independent. Because the reduced model has no positional encoding, the target score depends on token identity rather than target position. Across target-position buckets, meaning coarse groups of examples where the target appears near the beginning, middle, or non-final end of the sequence, the non-target score standard deviation stayed at 0.0, $\Delta$ was stable up to numerical noise, and learned-log e200 still crossed the threshold:
+
+```math
+c\Delta \approx 1.1284 > 1.
+```
+
+The detailed Stage 3C analysis is in `STAGE3C_TARGET_ANYWHERE.md`.
+
 ## Connection To Stage 1
 
 Stage 1 failed because positive target evidence weakened with length. The simplified model explains one possible mechanism:
