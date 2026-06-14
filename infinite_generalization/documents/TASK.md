@@ -1,330 +1,377 @@
-# Task: Mechanistic Interpretation Of The Simplest Model
+# Task: Stage 3C Target Can Appear Anywhere
 
 ## Objective
 
-Analyze the trained Stage 3 simplest model at the weight level.
+Extend the Stage 3 reduced attention model so that the target token can appear at any non-final position.
 
-This is not a new training experiment. The goal is to inspect an already trained reduced attention model and explicitly show how its learned query and key projections create:
-
-```math
-a>b.
-```
-
-Here:
-
-- $a$ is the attention score from the final query to the target key.
-- $b$ is the attention score from the final query to a non-target key.
-- $\Delta=a-b$ is the target-vs-non-target score margin.
-
-The central question is:
-
-**How do the learned $W_Q$ and $W_K$ matrices make the final query assign a larger score to the target token than to the non-target token?**
-
-## Background
-
-The simplest Stage 3 setup uses two tokens:
-
-- target token $t=0$
-- non-target token $u=1$
-
-The values are fixed one-hot vectors:
-
-```math
-t \mapsto [1,0],
-\qquad
-u \mapsto [0,1].
-```
-
-Positive inputs have the form:
+Stage 3 used positive inputs of the form:
 
 ```text
 t, u, u, ..., u
 ```
 
-Negative inputs have the form:
+This fixed the target at position 0. Stage 3C removes that positional simplification while preserving the most important theoretical condition:
 
 ```text
-u, u, u, ..., u
+the final readout query should still be produced by the non-target token u.
 ```
 
-The model uses:
+Therefore, for a sequence of length $n$, positive examples should place the single target token at:
 
-- learned query projection $W_Q$
-- learned key projection $W_K$
-- fixed values equal to the one-hot inputs
-- last-query attention
-- final linear classifier on the attention output
+```math
+p \in \{0,1,\ldots,n-2\}.
+```
 
-Because positive examples always end in $u$, the final query is the query produced by the non-target token:
+The last token must remain:
+
+```text
+u
+```
+
+so that:
 
 ```math
 q_{\mathrm{last}}=q_u.
 ```
 
-## Core Calculation
+The central question is:
 
-Given the one-hot token vectors:
+**Does the reduced model learn a position-independent target detector when the target can appear anywhere except the final readout position?**
 
-```math
-x_t=[1,0],
-\qquad
-x_u=[0,1],
+## Motivation
+
+This is the second next-step experiment from the June 9 meeting notes:
+
+```text
+Extend theory and empirical results to the case where target can be anywhere.
 ```
 
-compute:
+The goal is to test whether the Stage 3 mechanism depends on the target always appearing at position 0, or whether it genuinely detects the target token identity independent of position.
+
+If the model is position-independent, then the score row for a positive example with target at position $p$ should look like:
 
 ```math
-q_u = W_Q x_u,
+S_n=(b,\ldots,b,a,b,\ldots,b),
 ```
+
+where:
+
+- $a$ is the score assigned to the target key.
+- $b$ is the shared score assigned to each non-target key.
+- the location of $a$ changes with target position $p$.
+
+The closed-form target attention formula should remain:
 
 ```math
-k_t = W_K x_t,
-\qquad
-k_u = W_K x_u.
+p_t(n)
+=
+\frac{e^{\alpha\Delta}}
+{e^{\alpha\Delta}+(n-1)}.
 ```
 
-Then compute:
-
-```math
-a =
-\frac{q_u^\top k_t}{\sqrt{d}},
-```
-
-```math
-b =
-\frac{q_u^\top k_u}{\sqrt{d}},
-```
-
-where $d$ is the attention head dimension.
-
-Finally compute:
+Here:
 
 ```math
 \Delta=a-b.
 ```
 
-The target score is larger when:
+## Scope
 
-```math
-\Delta>0.
-```
+Modify the existing Stage 3 reduced-model pipeline.
 
-## Mechanistic Decomposition
-
-The most important identity is:
-
-```math
-\Delta
-=
-\frac{q_u^\top k_t-q_u^\top k_u}{\sqrt{d}}
-=
-\frac{q_u^\top(k_t-k_u)}{\sqrt{d}}.
-```
-
-Therefore, the model creates $a>b$ exactly when:
-
-```math
-q_u^\top(k_t-k_u)>0.
-```
-
-Interpretation:
-
-- $q_u$ describes what the final non-target query is looking for.
-- $k_t-k_u$ describes how the target key differs from the non-target key.
-- If $q_u$ aligns positively with $k_t-k_u$, then the target key receives a higher score.
-
-This is the main mechanism to explain.
-
-## Required Outputs
-
-Create a lightweight analysis script or notebook that loads a trained Stage 3 model and prints or saves:
-
-- $W_Q$
-- $W_K$
-- $q_u$
-- $k_t$
-- $k_u$
-- $k_t-k_u$
-- component-wise $q_u \odot k_t$
-- component-wise $q_u \odot k_u$
-- component-wise $q_u \odot (k_t-k_u)$
-- $a$
-- $b$
-- $\Delta$
-
-The analysis should make clear which dimensions contribute positively or negatively to $\Delta$.
-
-## Recommended Script
-
-Add a script:
-
-```text
-infinite_generalization/src/analyze_stage3_mechanism.py
-```
-
-The script should accept:
-
-```text
---run-dir runs/stage3_simplified_attention_learned_log_e200
-```
-
-or another Stage 3 run directory containing a trained model checkpoint.
-
-If the current Stage 3 pipeline does not save model checkpoints, add checkpoint saving to:
+Primary implementation file:
 
 ```text
 infinite_generalization/src/stage3_simplified_attention.py
 ```
 
-Recommended checkpoint path:
-
-```text
-model.pt
-```
-
-inside each run directory.
-
-## Analysis Steps
-
-### Step 1: Confirm Checkpoint Availability
-
-Check whether the Stage 3 runs save trained model weights.
-
-If not, modify the Stage 3 training script to save:
-
-```text
-model.pt
-```
-
-with enough metadata to reload:
-
-- `state_dict`
-- `d_head`
-- `alpha_mode`
-- `alpha_log_scale_init`
-
-### Step 2: Load A Trained Model
-
-Start with the strongest simple learned-log run:
-
-```text
-runs/stage3_simplified_attention_learned_log_e200
-```
-
-If that checkpoint is not available, rerun the Stage 3 learned-log condition with:
-
-```text
---alpha-mode learned_log
---train-lengths 10
---max-train-steps 6400
-```
-
-### Step 3: Extract Query And Key Weights
-
-Load:
-
-```math
-W_Q,
-\qquad
-W_K.
-```
-
-Be careful with PyTorch shape conventions.
-
-For:
-
-```python
-nn.Linear(2, d_head, bias=False)
-```
-
-the stored weight has shape:
-
-```text
-[d_head, 2]
-```
-
-Therefore:
-
-```python
-q_u = W_Q @ x_u
-k_t = W_K @ x_t
-k_u = W_K @ x_u
-```
-
-where:
-
-```python
-x_t = [1, 0]
-x_u = [0, 1]
-```
-
-### Step 4: Compute Scores
-
-Compute:
-
-```math
-a =
-\frac{q_u^\top k_t}{\sqrt{d}},
-\qquad
-b =
-\frac{q_u^\top k_u}{\sqrt{d}},
-\qquad
-\Delta=a-b.
-```
-
-Verify that the computed $\Delta$ matches the model's `mean_delta` in `metrics_by_length.csv`.
-
-### Step 5: Decompose The Margin
-
-Compute:
-
-```math
-q_u \odot (k_t-k_u).
-```
-
-Then:
-
-```math
-\Delta
-=
-\frac{\sum_i q_{u,i}(k_{t,i}-k_{u,i})}{\sqrt{d}}.
-```
-
-Report each dimension's contribution.
-
-This explains which hidden dimensions create the positive target-vs-non-target score margin.
-
-### Step 6: Write A Short Mechanistic Note
-
-Add a short section to:
+Primary report to update after running:
 
 ```text
 infinite_generalization/documents/STAGE3_SIMPLIFIED_LENGTH_AWARE_ATTENTION.md
 ```
 
-The note should explain:
+Do not add full transformer components in this task.
 
-- the final query is $q_u$ because the last token is $u$
-- the model creates $a>b$ because $q_u$ aligns more with $k_t$ than $k_u$
-- equivalently, $q_u^\top(k_t-k_u)>0$
-- the component-wise decomposition shows which dimensions create the margin
+Do not add positional encoding.
+
+Do not allow the target at the final position in the first Stage 3C version.
+
+## Experimental Design
+
+### Model
+
+Use the same reduced model as Stage 3:
+
+- two tokens: target $t=0$ and non-target $u=1$
+- fixed one-hot values: $t\mapsto[1,0]$, $u\mapsto[0,1]$
+- learned query projection matrix
+- learned key projection matrix
+- fixed values equal to the one-hot inputs
+- last-query attention
+- linear classifier on the attention output
+
+### Positive Inputs
+
+For length $n$, positive examples should contain exactly one target:
+
+```text
+u, ..., t, ..., u
+```
+
+with:
+
+```math
+target\_position \in \{0,1,\ldots,n-2\}.
+```
+
+The final token must always be:
+
+```text
+u
+```
+
+### Negative Inputs
+
+Negative examples remain:
+
+```text
+u, u, u, ..., u
+```
+
+### Why The Final Position Is Excluded
+
+If the target appears at the final position, then the final query becomes:
+
+```math
+q_{\mathrm{last}}=q_t.
+```
+
+That changes the theoretical setup. The current Stage 3 model assumes:
+
+```math
+q_{\mathrm{last}}=q_u.
+```
+
+Therefore Stage 3C should first vary target position while keeping the readout query fixed as the non-target query.
+
+## Conditions To Run
+
+Run the original Stage 3 conditions, but with target-anywhere positives.
+
+All runs should use:
+
+```text
+train_lengths = [10]
+target_position_mode = nonfinal_random
+eval_lengths = 10, 100, 1000, 10000, 100000, 1000000, 5000000, 10000000
+test_examples = 50
+eval_batch_size = 8
+```
+
+Use update budgets matching the earlier Stage 3 epoch-equivalent runs:
+
+| Run | Alpha mode | Epoch equivalent | Max train steps |
+|---|---|---:|---:|
+| `constant_e50` | `constant` | 50 | 1600 |
+| `constant_e100` | `constant` | 100 | 3200 |
+| `constant_e1000` | `constant` | 1000 | 32000 |
+| `log_e50` | `log` | 50 | 1600 |
+| `learned_log_e50` | `learned_log` | 50 | 1600 |
+| `learned_log_e100` | `learned_log` | 100 | 3200 |
+| `learned_log_e200` | `learned_log` | 200 | 6400 |
+
+Recommended output root:
+
+```text
+runs/stage3c_target_anywhere/
+```
+
+## Required Implementation Changes
+
+### Step 1: Add Target Position Mode
+
+Add a command-line option such as:
+
+```text
+--target-position-mode fixed_start
+--target-position-mode nonfinal_random
+```
+
+Expected behavior:
+
+- `fixed_start`: existing Stage 3 behavior, target at position 0.
+- `nonfinal_random`: target sampled uniformly from positions `0` through `length - 2`.
+
+Default should remain:
+
+```text
+fixed_start
+```
+
+to preserve backward compatibility.
+
+### Step 2: Update Dataset Generation
+
+Modify the two-token dataset generator so positive examples can use:
+
+```text
+target_position_mode = nonfinal_random
+```
+
+For each positive example:
+
+1. start with all non-target tokens
+2. sample a target position from `0` to `length - 2`
+3. place the target token there
+4. keep the final position as non-target
+
+Negative examples remain all non-target.
+
+### Step 3: Save Target Position Metadata
+
+For evaluation, save enough information to audit target-position behavior.
+
+At minimum, add aggregate metrics by target-position bucket:
+
+- `beginning`
+- `middle`
+- `end_nonfinal`
+
+Useful metrics:
+
+- positive accuracy by bucket
+- target attention by bucket
+- mean delta by bucket
+- non-target score std by bucket
+
+If exact per-position metrics are cheap, save them as a separate CSV:
+
+```text
+target_position_metrics.csv
+```
+
+### Step 4: Preserve Existing Metrics
+
+Keep all existing Stage 3 metrics:
+
+- `accuracy`
+- `positive_accuracy`
+- `negative_accuracy`
+- `mean_delta`
+- `std_non_target_scores`
+- `mean_empirical_target_attention`
+- `mean_theory_target_attention_using_empirical_delta`
+- `learned_alpha_coefficient`
+- classifier weights
+
+Add config metadata:
+
+- `target_position_mode`
+- whether final target positions are allowed
+
+### Step 5: Smoke Test
+
+Run a small smoke test:
+
+```text
+$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --smoke-test --alpha-mode learned_log --target-position-mode nonfinal_random --output-dir runs/stage3c_target_anywhere/smoke
+```
+
+Expected:
+
+- `model.pt` is created
+- `metrics_by_length.csv` is created
+- target-position metadata is saved
+- final token remains non-target in positives
+- no NaN appears in key metrics
+
+### Step 6: Run Stage 3C Conditions
+
+Run:
+
+```text
+constant_e50
+constant_e100
+constant_e1000
+log_e50
+learned_log_e50
+learned_log_e100
+learned_log_e200
+```
+
+under:
+
+```text
+runs/stage3c_target_anywhere/
+```
+
+Use the max-train-step budgets listed above.
+
+### Step 7: Analyze Results
+
+Answer:
+
+1. Does the model still satisfy the two-score assumption?
+2. Does $\Delta$ remain stable across target positions?
+3. Does target attention remain stable across target positions?
+4. Does learned-log e200 still reach $c\Delta>1$?
+5. Does any target-position bucket fail earlier?
+6. Does target-anywhere training change $c$, $\Delta$, or classifier calibration?
+
+## Expected Outcomes
+
+### Outcome A: Target Position Does Not Matter
+
+If the model works equally well across target positions:
+
+**The reduced model learned a position-independent token detector.**
+
+Expected signs:
+
+- non-target score std remains 0
+- $\Delta$ is stable across target-position buckets
+- target attention is stable across target-position buckets
+- learned-log e200 still reaches $c\Delta>1$
+
+### Outcome B: Target Position Matters
+
+If performance varies by target position:
+
+**The fixed-position Stage 3 result depended on more than token identity.**
+
+Inspect:
+
+- target attention by bucket
+- mean delta by bucket
+- positive logit by bucket
+- whether positions near the final query behave differently
+
+### Outcome C: Final-Adjacent Targets Behave Differently
+
+If `end_nonfinal` behaves differently:
+
+**The model may be sensitive to target proximity to the readout query, even without explicit positional encoding.**
+
+This would be surprising in the reduced no-position model and should be checked carefully for implementation artifacts.
 
 ## Success Criteria
 
 This task is complete when:
 
-- a trained Stage 3 model checkpoint can be loaded
-- $W_Q$ and $W_K$ are extracted
-- $q_u$, $k_t$, and $k_u$ are computed directly from the weights
-- $a$, $b$, and $\Delta$ are computed directly
-- the computed $\Delta$ matches the recorded Stage 3 metric
-- the margin is decomposed by dimension
-- the report explains why $a>b$ in weight-level terms
+- target-anywhere dataset generation is implemented
+- the final token remains non-target for positives
+- Stage 3C smoke test passes
+- all seven Stage 3C conditions are run
+- target-position metrics are saved
+- the report states whether the reduced model remains position-independent
+- conclusions do not overclaim beyond the reduced no-position model
 
 ## Notes
 
-- This analysis applies to the simplest reduced model only.
-- Do not add full transformer components in this task.
-- Do not change the target position.
-- Do not change token values or embeddings.
-- The purpose is interpretability, not improving performance.
+- This task keeps exactly one target token in positives.
+- This task keeps binary classification.
+- This task keeps fixed one-hot values.
+- This task keeps the final readout query as a non-target query.
+- Allowing the target at the final position is a separate follow-up.
+- Adding positional encodings is a separate follow-up.
