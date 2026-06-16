@@ -80,6 +80,7 @@ def load_model(checkpoint: dict[str, Any]) -> SimplifiedLastQueryAttentionClassi
         d_head=int(checkpoint["d_head"]),
         alpha_mode=str(checkpoint["alpha_mode"]),
         alpha_log_scale_init=float(checkpoint["alpha_log_scale_init"]),
+        non_target_token_count=int(checkpoint.get("non_target_token_count", 1)),
     )
     model.load_state_dict(checkpoint["state_dict"])
     model.eval()
@@ -109,8 +110,10 @@ def analyze_model(model: SimplifiedLastQueryAttentionClassifier) -> dict[str, An
     d_head = int(model.d_head)
     scale = math.sqrt(d_head)
 
-    x_t = torch.tensor([1.0, 0.0])
-    x_u = torch.tensor([0.0, 1.0])
+    x_t = torch.zeros(model.score_vocab_size)
+    x_u = torch.zeros(model.score_vocab_size)
+    x_t[TARGET_TOKEN_ID] = 1.0
+    x_u[NON_TARGET_TOKEN_ID] = 1.0
     q_u = w_q @ x_u
     k_t = w_k @ x_t
     k_u = w_k @ x_u
@@ -205,6 +208,7 @@ def main() -> None:
         "run_dir": str(run_dir),
         "target_token_id": TARGET_TOKEN_ID,
         "non_target_token_id": NON_TARGET_TOKEN_ID,
+        "non_target_token_count": checkpoint.get("non_target_token_count", 1),
         "alpha_mode": checkpoint["alpha_mode"],
         "optimizer_updates": checkpoint.get("optimizer_updates"),
         "train_lengths": checkpoint.get("train_lengths"),

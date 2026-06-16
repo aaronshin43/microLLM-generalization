@@ -33,6 +33,8 @@ class Stage3Config:
     train_length: int = 10
     train_lengths: tuple[int, ...] = ()
     target_position_mode: str = "fixed_start"
+    non_target_token_count: int = 1
+    non_target_sampling: str = "uniform"
     train_examples: int = 2_000
     val_examples: int = 500
     test_examples: int = 50
@@ -78,6 +80,18 @@ def parse_args() -> argparse.Namespace:
         choices=("fixed_start", "nonfinal_random"),
         default=Stage3Config.target_position_mode,
         help="Positive target placement mode.",
+    )
+    parser.add_argument(
+        "--non-target-token-count",
+        type=int,
+        default=Stage3Config.non_target_token_count,
+        help="Number of non-target token types. Token ids are 1 through this value.",
+    )
+    parser.add_argument(
+        "--non-target-sampling",
+        choices=("uniform",),
+        default=Stage3Config.non_target_sampling,
+        help="Sampling distribution for non-target token positions.",
     )
     parser.add_argument("--train-examples", type=int, default=Stage3Config.train_examples)
     parser.add_argument("--val-examples", type=int, default=Stage3Config.val_examples)
@@ -130,6 +144,10 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         raise ValueError("--max-train-steps must be positive when provided.")
     if args.target_position_mode not in {"fixed_start", "nonfinal_random"}:
         raise ValueError(f"Unsupported target position mode: {args.target_position_mode}")
+    if args.non_target_token_count < 1:
+        raise ValueError("--non-target-token-count must be at least 1.")
+    if args.non_target_sampling != "uniform":
+        raise ValueError(f"Unsupported non-target sampling: {args.non_target_sampling}")
 
     config = Stage3Config(
         seed=args.seed,
@@ -139,6 +157,8 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         train_length=args.train_length,
         train_lengths=train_lengths,
         target_position_mode=args.target_position_mode,
+        non_target_token_count=args.non_target_token_count,
+        non_target_sampling=args.non_target_sampling,
         train_examples=args.train_examples,
         val_examples=args.val_examples,
         test_examples=args.test_examples,
@@ -164,6 +184,8 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         train_length=10,
         train_lengths=config.train_lengths,
         target_position_mode=config.target_position_mode,
+        non_target_token_count=config.non_target_token_count,
+        non_target_sampling=config.non_target_sampling,
         train_examples=64,
         val_examples=32,
         test_examples=40,
@@ -203,23 +225,33 @@ def make_two_token_dataset(
     examples: int,
     seed: int,
     target_position_mode: str,
+    non_target_token_count: int,
+    non_target_sampling: str,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Create a balanced two-token target-presence dataset.
+    """Create a balanced target-presence dataset.
 
     Positive examples contain exactly one target. Negative examples are all non-target.
-    The token id convention is t=0 and u=1.
+    The token id convention is t=0 and non-target ids are 1..m.
     """
 
     if length < 2:
         raise ValueError("length must be at least 2 for the exactly-one-target setup.")
     if examples < 2:
         raise ValueError("examples must be at least 2.")
+    if non_target_token_count < 1:
+        raise ValueError("non_target_token_count must be at least 1.")
+    if non_target_sampling != "uniform":
+        raise ValueError(f"Unsupported non_target_sampling: {non_target_sampling}")
 
     positive_count = examples // 2
     negative_count = examples - positive_count
     generator = torch.Generator().manual_seed(seed)
 
-    positive_inputs = torch.full((positive_count, length), NON_TARGET_TOKEN_ID, dtype=torch.long)
+    positive_inputs = sample_non_target_tokens(
+        shape=(positive_count, length),
+        non_target_token_count=non_target_token_count,
+        generator=generator,
+    )
     if target_position_mode == "fixed_start":
         positive_target_positions = torch.full(
             (positive_count,),
@@ -240,7 +272,11 @@ def make_two_token_dataset(
     positive_inputs[torch.arange(positive_count), positive_target_positions] = TARGET_TOKEN_ID
     positive_labels = torch.ones(positive_count, dtype=torch.float32)
 
-    negative_inputs = torch.full((negative_count, length), NON_TARGET_TOKEN_ID, dtype=torch.long)
+    negative_inputs = sample_non_target_tokens(
+        shape=(negative_count, length),
+        non_target_token_count=non_target_token_count,
+        generator=generator,
+    )
     negative_labels = torch.zeros(negative_count, dtype=torch.float32)
     negative_target_positions = torch.full((negative_count,), -1, dtype=torch.long)
 
@@ -250,6 +286,25 @@ def make_two_token_dataset(
 
     permutation = torch.randperm(examples, generator=generator)
     return inputs[permutation], labels[permutation], target_positions[permutation]
+
+
+def sample_non_target_tokens(
+    *,
+    shape: tuple[int, ...],
+    non_target_token_count: int,
+    generator: torch.Generator,
+) -> torch.Tensor:
+    """Sample non-target token ids from 1..m."""
+
+    if non_target_token_count == 1:
+        return torch.full(shape, NON_TARGET_TOKEN_ID, dtype=torch.long)
+    return torch.randint(
+        low=NON_TARGET_TOKEN_ID,
+        high=non_target_token_count + 1,
+        size=shape,
+        generator=generator,
+        dtype=torch.long,
+    )
 
 
 def make_loader(
@@ -289,6 +344,8 @@ def make_multilength_loaders(
     lengths: tuple[int, ...],
     examples_per_length: int,
     target_position_mode: str,
+    non_target_token_count: int,
+    non_target_sampling: str,
     batch_size: int,
     shuffle: bool,
     seed: int,
@@ -307,6 +364,8 @@ def make_multilength_loaders(
             examples=examples_per_length,
             seed=seed + offset,
             target_position_mode=target_position_mode,
+            non_target_token_count=non_target_token_count,
+            non_target_sampling=non_target_sampling,
         )
         loaders.append(
             make_loader(
@@ -330,26 +389,46 @@ class SimplifiedLastQueryAttentionClassifier(nn.Module):
         d_head: int,
         alpha_mode: str,
         alpha_log_scale_init: float,
+        non_target_token_count: int = 1,
     ) -> None:
         super().__init__()
         if d_head < 1:
             raise ValueError("d_head must be positive.")
         if alpha_mode not in {"constant", "log", "learned_log"}:
             raise ValueError(f"Unsupported alpha_mode: {alpha_mode}")
+        if non_target_token_count < 1:
+            raise ValueError("non_target_token_count must be at least 1.")
 
         self.d_head = d_head
         self.alpha_mode = alpha_mode
-        self.query_projection = nn.Linear(2, d_head, bias=False)
-        self.key_projection = nn.Linear(2, d_head, bias=False)
+        self.non_target_token_count = non_target_token_count
+        self.score_vocab_size = non_target_token_count + 1
+        self.query_projection = nn.Linear(self.score_vocab_size, d_head, bias=False)
+        self.key_projection = nn.Linear(self.score_vocab_size, d_head, bias=False)
         self.classifier = nn.Linear(2, 1)
         self.alpha_log_scale_unconstrained = nn.Parameter(
             torch.tensor(float(alpha_log_scale_init))
         )
 
-    def token_embeddings(self, tokens: torch.Tensor) -> torch.Tensor:
-        """Return fixed one-hot embeddings with t=[1,0] and u=[0,1]."""
+    def project_tokens(self, tokens: torch.Tensor, projection: nn.Linear) -> torch.Tensor:
+        """Apply a no-bias one-hot linear projection using an embedding lookup."""
 
-        return F.one_hot(tokens, num_classes=2).to(dtype=torch.float32)
+        return F.embedding(tokens, projection.weight.transpose(0, 1))
+
+    def token_value_output(
+        self,
+        tokens: torch.Tensor,
+        attention_weights: torch.Tensor,
+    ) -> torch.Tensor:
+        """Map all non-target token values to [0, 1] and target values to [1, 0]."""
+
+        target_mass = attention_weights.masked_fill(tokens.ne(TARGET_TOKEN_ID), 0.0).sum(dim=1)
+        return torch.stack([target_mass, 1.0 - target_mass], dim=1)
+
+    def key_vectors_for_token_ids(self, token_ids: torch.Tensor) -> torch.Tensor:
+        """Return key vectors for token ids without constructing sequence one-hots."""
+
+        return self.project_tokens(token_ids, self.key_projection)
 
     def alpha_for_length(self, length: int, device: torch.device) -> torch.Tensor:
         """Return the inverse-temperature scale for a sequence length."""
@@ -381,16 +460,13 @@ class SimplifiedLastQueryAttentionClassifier(nn.Module):
         """Run last-query attention and optional mechanism tracing."""
 
         length = tokens.shape[1]
-        embeddings = self.token_embeddings(tokens)
-        queries = self.query_projection(embeddings)
-        keys = self.key_projection(embeddings)
-
-        last_query = queries[:, -1, :]
+        keys = self.project_tokens(tokens, self.key_projection)
+        last_query = self.project_tokens(tokens[:, -1], self.query_projection)
         raw_scores = torch.einsum("bd,bld->bl", last_query, keys) / math.sqrt(self.d_head)
         alpha = self.alpha_for_length(length, tokens.device)
         corrected_scores = alpha * raw_scores
         attention_weights = torch.softmax(corrected_scores, dim=-1)
-        attention_output = torch.einsum("bl,bld->bd", attention_weights, embeddings)
+        attention_output = self.token_value_output(tokens, attention_weights)
         logits = self.classifier(attention_output).squeeze(-1)
 
         if not return_details:
@@ -401,6 +477,7 @@ class SimplifiedLastQueryAttentionClassifier(nn.Module):
             "corrected_scores": corrected_scores,
             "attention_weights": attention_weights,
             "attention_output": attention_output,
+            "last_query": last_query,
             "alpha": alpha.expand(tokens.shape[0]),
         }
         return logits, details
@@ -416,6 +493,18 @@ def target_attention_theory(
 
     log_non_target_count = math.log(length - 1)
     return torch.sigmoid(alpha * delta - log_non_target_count)
+
+
+def generalized_target_attention_theory(
+    *,
+    alpha: torch.Tensor,
+    margins: torch.Tensor,
+    counts: torch.Tensor,
+) -> torch.Tensor:
+    """Compute target attention with multiple non-target score margins."""
+
+    denominator_terms = counts.to(dtype=torch.float32) * torch.exp(-alpha.unsqueeze(1) * margins)
+    return 1.0 / (1.0 + denominator_terms.sum(dim=1))
 
 
 def binary_accuracy(logits: torch.Tensor, labels: torch.Tensor) -> dict[str, float]:
@@ -605,8 +694,14 @@ def evaluate_length(
     batch_size: int,
     seed: int,
     target_position_mode: str,
+    non_target_token_count: int,
+    non_target_sampling: str,
     device: torch.device,
-) -> tuple[dict[str, float | int | str], list[dict[str, float | int | str]]]:
+) -> tuple[
+    dict[str, float | int | str],
+    list[dict[str, float | int | str]],
+    list[dict[str, float | int | str]],
+]:
     """Evaluate one length and collect mechanism metrics."""
 
     inputs, labels, target_positions = make_two_token_dataset(
@@ -614,6 +709,8 @@ def evaluate_length(
         examples=examples,
         seed=seed,
         target_position_mode=target_position_mode,
+        non_target_token_count=non_target_token_count,
+        non_target_sampling=non_target_sampling,
     )
     loader = make_loader(
         inputs,
@@ -635,11 +732,25 @@ def evaluate_length(
     non_target_means: list[torch.Tensor] = []
     deltas: list[torch.Tensor] = []
     non_target_stds: list[torch.Tensor] = []
+    min_margins: list[torch.Tensor] = []
+    max_non_target_scores: list[torch.Tensor] = []
+    non_target_type_score_stds: list[torch.Tensor] = []
     empirical_attentions: list[torch.Tensor] = []
     empirical_theory_attentions: list[torch.Tensor] = []
+    generalized_theory_attentions: list[torch.Tensor] = []
     alpha_values: list[torch.Tensor] = []
     positive_target_positions: list[torch.Tensor] = []
     positive_correct_values: list[torch.Tensor] = []
+    per_type_values: dict[int, dict[str, list[torch.Tensor]]] = {
+        token_id: {
+            "counts": [],
+            "scores": [],
+            "margins": [],
+            "denominator_contributions": [],
+            "denominator_fractions": [],
+        }
+        for token_id in range(NON_TARGET_TOKEN_ID, non_target_token_count + 1)
+    }
 
     for tokens, batch_labels, batch_target_positions in loader:
         tokens = tokens.to(device)
@@ -662,7 +773,9 @@ def evaluate_length(
         if positive_mask.any():
             raw_scores = details["raw_scores"][positive_mask]
             attention_weights = details["attention_weights"][positive_mask]
+            positive_tokens = tokens[positive_mask]
             alpha = details["alpha"][positive_mask]
+            last_query = details["last_query"][positive_mask]
             target_position = batch_target_positions[positive_mask]
             if target_position.eq(length - 1).any():
                 raise RuntimeError("Positive examples must not place the target at final position.")
@@ -675,6 +788,32 @@ def evaluate_length(
             )
             non_target_mean = non_target_scores.mean(dim=1)
             delta = target_score - non_target_mean
+            non_target_token_ids = torch.arange(
+                NON_TARGET_TOKEN_ID,
+                non_target_token_count + 1,
+                device=device,
+                dtype=torch.long,
+            )
+            non_target_type_keys = model.key_vectors_for_token_ids(non_target_token_ids)
+            non_target_type_scores = (
+                torch.einsum("bd,kd->bk", last_query, non_target_type_keys)
+                / math.sqrt(model.d_head)
+            )
+            non_target_type_counts = torch.stack(
+                [
+                    positive_tokens.eq(token_id).sum(dim=1)
+                    for token_id in non_target_token_ids.tolist()
+                ],
+                dim=1,
+            )
+            type_margins = target_score.unsqueeze(1) - non_target_type_scores
+            denominator_contributions = non_target_type_counts.to(dtype=torch.float32) * torch.exp(
+                -alpha.unsqueeze(1) * type_margins
+            )
+            denominator_sum = denominator_contributions.sum(dim=1)
+            denominator_fractions = denominator_contributions / denominator_sum.clamp_min(
+                1e-30
+            ).unsqueeze(1)
             empirical_attention = attention_weights.gather(
                 1,
                 target_position.unsqueeze(1),
@@ -684,16 +823,41 @@ def evaluate_length(
                 alpha=alpha,
                 delta=delta,
             )
+            generalized_theory_attention = generalized_target_attention_theory(
+                alpha=alpha,
+                margins=type_margins,
+                counts=non_target_type_counts,
+            )
 
             target_scores.append(target_score.cpu())
             non_target_means.append(non_target_mean.cpu())
             deltas.append(delta.cpu())
             non_target_stds.append(non_target_scores.std(dim=1, unbiased=False).cpu())
+            min_margins.append(type_margins.min(dim=1).values.cpu())
+            max_non_target_scores.append(non_target_type_scores.max(dim=1).values.cpu())
+            non_target_type_score_stds.append(
+                non_target_type_scores.std(dim=1, unbiased=False).cpu()
+            )
             empirical_attentions.append(empirical_attention.cpu())
             empirical_theory_attentions.append(theory_attention.cpu())
+            generalized_theory_attentions.append(generalized_theory_attention.cpu())
             alpha_values.append(alpha.cpu())
             positive_target_positions.append(target_position.cpu())
             positive_correct_values.append(logits[positive_mask].ge(0).cpu())
+            for column_index, token_id in enumerate(non_target_token_ids.tolist()):
+                per_type_values[token_id]["counts"].append(
+                    non_target_type_counts[:, column_index].cpu()
+                )
+                per_type_values[token_id]["scores"].append(
+                    non_target_type_scores[:, column_index].cpu()
+                )
+                per_type_values[token_id]["margins"].append(type_margins[:, column_index].cpu())
+                per_type_values[token_id]["denominator_contributions"].append(
+                    denominator_contributions[:, column_index].cpu()
+                )
+                per_type_values[token_id]["denominator_fractions"].append(
+                    denominator_fractions[:, column_index].cpu()
+                )
 
     logits_cpu = torch.cat(all_logits)
     labels_cpu = torch.cat(all_labels)
@@ -707,20 +871,30 @@ def evaluate_length(
     non_target_means_cpu = torch.cat(non_target_means)
     deltas_cpu = torch.cat(deltas)
     non_target_stds_cpu = torch.cat(non_target_stds)
+    min_margins_cpu = torch.cat(min_margins)
+    max_non_target_scores_cpu = torch.cat(max_non_target_scores)
+    non_target_type_score_stds_cpu = torch.cat(non_target_type_score_stds)
     empirical_attentions_cpu = torch.cat(empirical_attentions)
     empirical_theory_attentions_cpu = torch.cat(empirical_theory_attentions)
+    generalized_theory_attentions_cpu = torch.cat(generalized_theory_attentions)
     alpha_values_cpu = torch.cat(alpha_values)
     positive_target_positions_cpu = torch.cat(positive_target_positions)
     positive_correct_cpu = torch.cat(positive_correct_values)
 
     attention_abs_error = (empirical_attentions_cpu - empirical_theory_attentions_cpu).abs()
+    generalized_attention_abs_error = (
+        empirical_attentions_cpu - generalized_theory_attentions_cpu
+    ).abs()
     classifier_weight = model.classifier.weight.detach().cpu().squeeze(0)
+    learned_alpha_coefficient = model.learned_alpha_coefficient()
 
     row = {
         "length": length,
         "split": "test",
         "alpha_mode": model.alpha_mode,
         "target_position_mode": target_position_mode,
+        "non_target_token_count": non_target_token_count,
+        "non_target_sampling": non_target_sampling,
         "alpha_value": alpha_values_cpu.mean().item(),
         "accuracy": metrics["accuracy"],
         "positive_accuracy": metrics["positive_accuracy"],
@@ -733,13 +907,33 @@ def evaluate_length(
         "mean_non_target_score_b": mean_or_nan(non_target_means_cpu),
         "mean_delta": mean_or_nan(deltas_cpu),
         "std_non_target_scores": mean_or_nan(non_target_stds_cpu),
+        "mean_min_margin_delta": mean_or_nan(min_margins_cpu),
+        "min_margin_delta": min_margins_cpu.min().item(),
+        "mean_max_non_target_score": mean_or_nan(max_non_target_scores_cpu),
+        "mean_non_target_type_score_std": mean_or_nan(non_target_type_score_stds_cpu),
         "mean_empirical_target_attention": mean_or_nan(empirical_attentions_cpu),
         "mean_theory_target_attention_using_empirical_delta": mean_or_nan(
             empirical_theory_attentions_cpu
         ),
+        "mean_generalized_theory_target_attention": mean_or_nan(
+            generalized_theory_attentions_cpu
+        ),
         "mean_theory_target_attention_using_train_delta": float("nan"),
         "mean_attention_absolute_error_empirical_vs_theory": mean_or_nan(attention_abs_error),
-        "learned_alpha_coefficient": model.learned_alpha_coefficient(),
+        "mean_attention_absolute_error_empirical_vs_generalized_theory": mean_or_nan(
+            generalized_attention_abs_error
+        ),
+        "learned_alpha_coefficient": learned_alpha_coefficient,
+        "learned_log_c_delta_min_mean": (
+            learned_alpha_coefficient * mean_or_nan(min_margins_cpu)
+            if model.alpha_mode == "learned_log"
+            else float("nan")
+        ),
+        "learned_log_c_delta_min_worst": (
+            learned_alpha_coefficient * min_margins_cpu.min().item()
+            if model.alpha_mode == "learned_log"
+            else float("nan")
+        ),
         "classifier_weight_target_coord": classifier_weight[0].item(),
         "classifier_weight_non_target_coord": classifier_weight[1].item(),
         "classifier_bias": model.classifier.bias.detach().cpu().item(),
@@ -753,7 +947,30 @@ def evaluate_length(
         deltas=deltas_cpu,
         non_target_stds=non_target_stds_cpu,
     )
-    return row, position_rows
+    non_target_type_rows = []
+    for token_id, values in per_type_values.items():
+        counts = torch.cat(values["counts"])
+        scores = torch.cat(values["scores"])
+        margins = torch.cat(values["margins"])
+        denominator_contributions = torch.cat(values["denominator_contributions"])
+        denominator_fractions = torch.cat(values["denominator_fractions"])
+        non_target_type_rows.append(
+            {
+                "length": length,
+                "split": "test",
+                "alpha_mode": model.alpha_mode,
+                "target_position_mode": target_position_mode,
+                "non_target_token_count": non_target_token_count,
+                "non_target_sampling": non_target_sampling,
+                "non_target_token_id": token_id,
+                "mean_non_target_count_in_sequence": counts.to(dtype=torch.float32).mean().item(),
+                "mean_non_target_score": mean_or_nan(scores),
+                "mean_margin_from_target": mean_or_nan(margins),
+                "mean_denominator_contribution": mean_or_nan(denominator_contributions),
+                "mean_denominator_fraction": mean_or_nan(denominator_fractions),
+            }
+        )
+    return row, position_rows, non_target_type_rows
 
 
 def add_train_delta_theory(
@@ -817,6 +1034,8 @@ def save_model_checkpoint(
             "optimizer_updates": optimizer_updates,
             "target_token_id": TARGET_TOKEN_ID,
             "non_target_token_id": NON_TARGET_TOKEN_ID,
+            "non_target_token_count": config.non_target_token_count,
+            "non_target_sampling": config.non_target_sampling,
             "target_position_mode": config.target_position_mode,
             "final_target_allowed": False,
         },
@@ -854,6 +1073,13 @@ def write_figures(output_dir: Path, rows: list[dict[str, Any]]) -> None:
         marker="s",
         label="theory using empirical delta",
     )
+    if "mean_generalized_theory_target_attention" in rows[0]:
+        ax.plot(
+            lengths,
+            [float(row["mean_generalized_theory_target_attention"]) for row in rows],
+            marker="D",
+            label="generalized theory",
+        )
     ax.plot(
         lengths,
         [float(row["mean_theory_target_attention_using_train_delta"]) for row in rows],
@@ -943,6 +1169,8 @@ def train_model(
         lengths=train_lengths,
         examples_per_length=config.train_examples,
         target_position_mode=config.target_position_mode,
+        non_target_token_count=config.non_target_token_count,
+        non_target_sampling=config.non_target_sampling,
         batch_size=config.batch_size,
         shuffle=True,
         seed=config.seed + 1,
@@ -951,6 +1179,8 @@ def train_model(
         lengths=train_lengths,
         examples_per_length=config.val_examples,
         target_position_mode=config.target_position_mode,
+        non_target_token_count=config.non_target_token_count,
+        non_target_sampling=config.non_target_sampling,
         batch_size=config.eval_batch_size,
         shuffle=False,
         seed=config.seed + 2,
@@ -960,6 +1190,7 @@ def train_model(
         d_head=config.d_head,
         alpha_mode=config.alpha_mode,
         alpha_log_scale_init=config.alpha_log_scale_init,
+        non_target_token_count=config.non_target_token_count,
     ).to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.AdamW(
@@ -1050,6 +1281,8 @@ def main() -> None:
             "resolved_device": str(device),
             "target_token_id": TARGET_TOKEN_ID,
             "non_target_token_id": NON_TARGET_TOKEN_ID,
+            "non_target_token_count": config.non_target_token_count,
+            "non_target_sampling": config.non_target_sampling,
             "target_position_mode": config.target_position_mode,
             "final_target_allowed": False,
         },
@@ -1063,15 +1296,22 @@ def main() -> None:
             batch_size=config.eval_batch_size,
             seed=config.seed + 10_000 + length,
             target_position_mode=config.target_position_mode,
+            non_target_token_count=config.non_target_token_count,
+            non_target_sampling=config.non_target_sampling,
             device=device,
         )
         for length in config.eval_lengths
     ]
-    rows = [row for row, _ in evaluation_results]
+    rows = [row for row, _, _ in evaluation_results]
     target_position_rows = [
         position_row
-        for _, position_rows in evaluation_results
+        for _, position_rows, _ in evaluation_results
         for position_row in position_rows
+    ]
+    non_target_type_rows = [
+        type_row
+        for _, _, type_rows in evaluation_results
+        for type_row in type_rows
     ]
     add_train_delta_theory(rows, train_length=train_lengths[0])
     for row in rows:
@@ -1086,9 +1326,17 @@ def main() -> None:
         row["optimizer_updates"] = optimizer_updates
         row["examples_per_train_length"] = config.train_examples
         row["final_target_allowed"] = False
+    for row in non_target_type_rows:
+        row["train_lengths"] = " ".join(str(length) for length in train_lengths)
+        row["train_length_count"] = len(train_lengths)
+        row["optimizer_updates"] = optimizer_updates
+        row["examples_per_train_length"] = config.train_examples
+        row["final_target_allowed"] = False
     write_csv(output_dir / "metrics_by_length.csv", rows)
     if target_position_rows:
         write_csv(output_dir / "target_position_metrics.csv", target_position_rows)
+    if non_target_type_rows:
+        write_csv(output_dir / "non_target_type_metrics.csv", non_target_type_rows)
     write_figures(output_dir, rows)
 
     print(f"Wrote outputs to: {output_dir}")
