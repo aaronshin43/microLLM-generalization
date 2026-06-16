@@ -106,7 +106,7 @@ p_t(n\mid r)
 {1+\sum_{k=1}^{m}c_k(n)e^{-\alpha\Delta_{r,k}}}.
 ```
 
-The important margin is no longer the average margin. The bottleneck is the smallest margin:
+For each positive example, the model has one target score and several non-target type scores. The key diagnostic is the smallest target-vs-non-target margin, because that non-target type contributes most strongly to the softmax denominator:
 
 ```math
 \Delta_{\min}=\min_{r,k}\Delta_{r,k}.
@@ -114,7 +114,7 @@ The important margin is no longer the average margin. The bottleneck is the smal
 
 The non-target type with the smallest margin has the largest score among the non-target types for some final-query condition, so its denominator term decays slowest. If that token type appears with frequency proportional to $n$, it can dominate long-length behavior.
 
-The implementation records per-example margins and aggregates them across sampled last-token types. Therefore, the reported $\Delta_{\min}$ values below are empirical aggregate diagnostics, not a full per-$r$ exhaustive table.
+The main tables average over examples whose final token types may differ. They do not separately report results for each possible final token type $r$.
 
 For learned-log attention,
 
@@ -161,7 +161,7 @@ u_{i_1}, u_{i_2}, ..., u_{i_n}
 
 Non-target tokens are sampled uniformly from token ids `1` through `4`. The last token is therefore also a sampled non-target token, so Stage 3D metrics average over multiple final-query identities.
 
-The score representation and attention value representation are separated:
+The model uses token-specific representations to compute query/key scores, but the value passed to the classifier is still binary: target evidence or non-target evidence.
 
 - Query/key scores distinguish all token ids `0,1,2,3,4`.
 - Attention values remain binary: target maps to `[1,0]`, and every non-target token maps to `[0,1]`.
@@ -210,8 +210,8 @@ Interpretation:
 
 - Constant multiplier still fails at long length, even after much longer training.
 - Fixed log multiplier succeeds because even the worst observed margin is much larger than 1.
-- Learned-log e200 reaches $c\Delta_{\min}>1$ using both the mean and worst-observed aggregate diagnostics.
-- Learned-log e50 and e100 succeed through 10M, but both their mean and worst-observed $c\Delta_{\min}$ values are below 1, so they should be interpreted as finite-length successes rather than confirmed asymptotic solutions.
+- For learned-log e200, both the mean value and the worst observed value are above the threshold: mean $c\Delta_{\min}\approx1.303$ and worst observed $c\Delta_{\min}\approx1.227$.
+- Learned-log e50 and e100 work up to the tested maximum length, 10M, but because $c\Delta_{\min}<1$, the simplified asymptotic theory still predicts eventual degradation at sufficiently large length.
 
 ## Does The Model Collapse Non-Target Attention Scores?
 
@@ -235,7 +235,7 @@ Instead, it learned a multi-score structure conditioned on the last-token type t
 S_n^{(r)}=(a_r,b_{r,i_1},b_{r,i_2},\ldots,b_{r,i_{n-1}}).
 ```
 
-The important result is that length-aware attention can still work in this reduced model without exact non-target attention-score collapse. This is a score-level claim; it does not by itself prove that the non-target key vectors are geometrically distinct in every possible sense.
+The important result is that length-aware attention can still work without collapsing all non-target token types to the same final-query attention score. This is a score-level conclusion: it shows that the scalar scores $q_r \cdot k_{u_k}$ differ across non-target types, but it does not fully characterize the geometry of the learned key vectors themselves.
 
 ## Which Non-Target Type Dominates The Denominator?
 
@@ -251,7 +251,7 @@ Aggregated over sampled last-token types, token id `3` is the dominant non-targe
 | `learned_log_e100_nt4` | 3 | 8.293 | 0.574 |
 | `learned_log_e200_nt4` | 3 | 8.637 | 0.625 |
 
-Because non-target tokens were sampled uniformly, each non-target type appears about equally often. At length 10M, each type appears about 2.5M times on average. Therefore, token id `3` dominates the aggregate denominator mainly because it has the smallest aggregate margin, not because it appears much more often.
+Because non-target tokens were sampled uniformly, each non-target type appears about equally often. At length 10M, each type appears about 2.5M times on average. Token id `3` contributes the largest fraction of the non-target softmax denominator after averaging over the evaluation examples, mainly because it has the smallest aggregate margin rather than because it appears much more often.
 
 I also checked the saved checkpoint weights directly. For each last-token type $r\in\{1,2,3,4\}$, I computed the margins:
 
@@ -348,9 +348,9 @@ The key result is not simply that learned-log succeeds at 10M. The key result is
 c\min_{r,k}\Delta_{r,k}>1.
 ```
 
-## Theory-Practice Attention Match
+## Reconstructing Empirical Attention
 
-The generalized theory prediction matches empirical target attention with very small error. At length 10M, the largest mean absolute error among the main runs is about:
+The generalized formula reconstructs empirical target attention with very small error. At length 10M, the largest mean absolute error among the main runs is about:
 
 ```math
 1.20\times10^{-6}.
@@ -431,4 +431,4 @@ Therefore, the Stage 3 mechanism extends beyond the exact two-score assumption. 
 - The last token is a sampled non-target token, so the current metrics are averaged over different final query identities.
 - The report does not yet include a per-final-query-type breakdown, so aggregate bottleneck claims should not be read as proving the same bottleneck for every $r$.
 - Attention values are still binary and fixed; distinct or learned non-target value vectors are not tested here.
-- This result applies to the reduced Stage 3 model and does not automatically transfer to full transformers.
+- This result applies to the reduced Stage 3 model and does not automatically transfer to full transformers. Full transformers include learned value vectors, residual streams, MLPs, layer normalization, multiple heads, and classifier or pooling effects, so this reduced-model mechanism may not transfer directly.
