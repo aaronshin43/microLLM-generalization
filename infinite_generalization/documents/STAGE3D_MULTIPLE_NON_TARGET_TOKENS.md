@@ -16,6 +16,8 @@ The main question is:
 
 ## Generalized Theory
 
+The Stage 3D model still computes ordinary position-level softmax attention. The generalized formula below is not a new attention mechanism. It is an algebraic rewrite of the same softmax that groups repeated non-target positions by token type, so that we can analyze which non-target types dominate the denominator.
+
 ### Original Two-Score Case
 
 The original Stage 3 setup had one target token and one non-target token. A positive input produced the final-query attention score row:
@@ -356,9 +358,9 @@ The generalized formula reconstructs empirical target attention with very small 
 1.20\times10^{-6}.
 ```
 
-This should not be interpreted as surprising evidence by itself. The generalized formula is the full softmax rewritten using the recorded per-type counts and per-type scores. Once those counts and scores are measured correctly, the formula should match.
+This should not be interpreted as surprising evidence by itself. The generalized formula is the full position-level softmax rewritten using the recorded per-type counts and per-type scores. Once those counts and scores are measured correctly, the formula should match.
 
-The meaningful empirical result is that the model produces non-identical non-target attention scores, and the observed behavior is still explained by the generalized denominator and the smallest margin.
+This reconstruction is therefore a sanity check: it verifies that the recorded counts and scores correctly recover the model's position-level softmax before using them for denominator analysis. The meaningful empirical result is that the model produces non-identical non-target attention scores, and the observed behavior is still explained by the generalized denominator and the smallest margin.
 
 ## Answers To The Main Questions
 
