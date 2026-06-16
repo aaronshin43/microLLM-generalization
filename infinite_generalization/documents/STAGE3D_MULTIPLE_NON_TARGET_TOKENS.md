@@ -253,7 +253,24 @@ Aggregated over sampled last-token types, token id `3` is the dominant non-targe
 
 Because non-target tokens were sampled uniformly, each non-target type appears about equally often. At length 10M, each type appears about 2.5M times on average. Therefore, token id `3` dominates the aggregate denominator mainly because it has the smallest aggregate margin, not because it appears much more often.
 
-This does not prove that token id `3` is the bottleneck for every final-query token type $r$. It means token id `3` is the dominant bottleneck after averaging over the sampled last-token types in the current metrics.
+I also checked the saved checkpoint weights directly. For each last-token type $r\in\{1,2,3,4\}$, I computed the margins:
+
+```math
+\Delta_{r,k}=a_r-b_{r,k}.
+```
+
+This weight-level calculation confirmed that token id `3` is the smallest-margin non-target for every last-token type in all seven main runs.
+
+For the strongest learned-log run, the direct margins were:
+
+| Last-token type $r$ | Smallest-margin token | $\Delta_{r,1}$ | $\Delta_{r,2}$ | $\Delta_{r,3}$ | $\Delta_{r,4}$ |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 3 | 8.951 | 8.925 | 8.457 | 9.040 |
+| 2 | 3 | 8.807 | 9.115 | 8.584 | 9.107 |
+| 3 | 3 | 8.455 | 8.613 | 8.132 | 8.655 |
+| 4 | 3 | 9.300 | 9.427 | 8.908 | 9.490 |
+
+One alternate-seed check with `learned_log_e200_nt4` also produced token id `3` as the bottleneck for every last-token type. However, this is not enough to explain why token id `3` is consistently the bottleneck. The most plausible explanation is symmetry breaking from random initialization and optimizer trajectory, but a systematic seed or initialization analysis has not been done.
 
 For the strongest learned-log run:
 
