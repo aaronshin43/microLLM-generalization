@@ -369,7 +369,7 @@ For the `learned_log_e200_nt4` run:
 | 3 | 2499746.0 | -4.463 | 8.637 | 0.625 |
 | 4 | 2499985.0 | -5.028 | 9.203 | 0.089 |
 
-Even though the non-target token types appear at similar frequencies, the type with the smallest margin contributes most of the non-target denominator. Therefore, the long-length risk is controlled by the hardest non-target type, not by the average non-target type.
+Even though the non-target token types appear at similar frequencies, the type with the smallest margin contributes most of the non-target denominator. Therefore, the long-length risk is controlled by the non-target type with the smallest margin, not by the average non-target type.
 
 ## Scaling Across Non-Target Token Count
 
@@ -421,7 +421,7 @@ nt4: worst Delta_min = 8.132
 nt8: worst Delta_min = 7.932
 ```
 
-This is expected. $\Delta_{\min}$ is a minimum over more non-target token types, so adding more non-target types increases the chance that one type becomes a harder competitor.
+This is expected. $\Delta_{\min}$ is a minimum over more non-target token types, so adding more non-target types increases the chance that one type becomes a smaller-margin competitor.
 
 However, the learned coefficient $c$ increases at the same time:
 
@@ -431,7 +431,7 @@ nt4: c = 0.1509
 nt8: c = 0.1584
 ```
 
-As a result, the effective worst-case quantity $c\Delta_{\min}$ stays above 1. In these runs, learned-log attention appears to compensate for the harder non-target set by increasing the log-length multiplier.
+As a result, the effective worst-case quantity $c\Delta_{\min}$ stays above 1. In these runs, learned-log attention appears to compensate for the smaller-margin non-target set by increasing the log-length multiplier.
 
 The non-target type-score standard deviation also increases as more non-target token types are added:
 
@@ -459,7 +459,7 @@ Because `train_length=10` gives only 9 non-target positions in each positive exa
 
 **Stage 3D shows that exact non-target attention-score collapse is not necessary in the reduced model.**
 
-The model does not force all non-target token types to share one attention score. Instead, it learns distinct non-target scores, and long-length behavior is governed by the hardest final-query/non-target-key pair:
+The model does not force all non-target token types to share one attention score. Instead, it learns distinct non-target scores, and long-length behavior is governed by the final-query/non-target-key pair with the smallest margin:
 
 ```math
 \Delta_{\min}=\min_{r,k}(a_r-b_{r,k}).

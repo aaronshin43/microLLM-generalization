@@ -11,7 +11,7 @@ The purpose of this check is narrow:
 
 **Does allowing the target to appear anywhere change the Stage 3D multiple-non-target conclusion?**
 
-The expected answer is no. The reduced model has no positional encoding, so target position should not materially affect the attention score assigned to the target token. The main difficulty should still be the multiple-non-target denominator and the hardest target-vs-non-target margin.
+The expected answer is no. The reduced model has no positional encoding, so target position should not materially affect the attention score assigned to the target token. The main difficulty should still be the multiple-non-target denominator and the smallest target-vs-non-target margin.
 
 ## Setup
 
@@ -107,7 +107,7 @@ At length 10M:
 | `log_e50_nt4_target_anywhere` | 2 | 4.232 | 0.525 |
 | `learned_log_e200_nt4_target_anywhere` | 2 | 8.523 | 0.364 |
 
-This does not change the main interpretation. The identity of the hardest non-target type can vary by run, seed, or final-query composition. The important diagnostic is still the worst-case margin and denominator contribution, not the specific token id.
+This does not change the main interpretation. The identity of the denominator-dominant non-target type can vary by run, seed, or final-query composition. The important diagnostic is still the worst-case margin and denominator contribution, not the specific token id.
 
 ## Conclusion
 
@@ -117,7 +117,7 @@ When the target can appear at any non-final position, the reduced model behaves 
 
 The main Stage 3D conclusion remains unchanged:
 
-**With multiple non-target token types, long-length behavior is governed by the hardest final-query/non-target-key margin, not by target position.**
+**With multiple non-target token types, long-length behavior is governed by the final-query/non-target-key pair with the smallest margin, not by target position.**
 
 ## Limitations
 
