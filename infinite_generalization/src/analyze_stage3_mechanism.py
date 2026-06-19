@@ -80,6 +80,7 @@ def load_model(checkpoint: dict[str, Any]) -> SimplifiedLastQueryAttentionClassi
         d_head=int(checkpoint["d_head"]),
         alpha_mode=str(checkpoint["alpha_mode"]),
         alpha_log_scale_init=float(checkpoint["alpha_log_scale_init"]),
+        target_token_count=int(checkpoint.get("target_token_count", 1)),
         non_target_token_count=int(checkpoint.get("non_target_token_count", 1)),
     )
     model.load_state_dict(checkpoint["state_dict"])
@@ -113,7 +114,7 @@ def analyze_model(model: SimplifiedLastQueryAttentionClassifier) -> dict[str, An
     x_t = torch.zeros(model.score_vocab_size)
     x_u = torch.zeros(model.score_vocab_size)
     x_t[TARGET_TOKEN_ID] = 1.0
-    x_u[NON_TARGET_TOKEN_ID] = 1.0
+    x_u[int(checkpoint_non_target_token_id(model))] = 1.0
     q_u = w_q @ x_u
     k_t = w_k @ x_t
     k_u = w_k @ x_u
@@ -176,6 +177,12 @@ def build_decomposition_rows(analysis: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def checkpoint_non_target_token_id(model: SimplifiedLastQueryAttentionClassifier) -> int:
+    """Return the first non-target token id for a reconstructed Stage 3 model."""
+
+    return int(model.target_token_count)
+
+
 def write_json(path: Path, data: dict[str, Any]) -> None:
     """Write JSON output."""
 
@@ -207,7 +214,8 @@ def main() -> None:
     summary = {
         "run_dir": str(run_dir),
         "target_token_id": TARGET_TOKEN_ID,
-        "non_target_token_id": NON_TARGET_TOKEN_ID,
+        "target_token_count": checkpoint.get("target_token_count", 1),
+        "non_target_token_id": checkpoint.get("non_target_token_id", NON_TARGET_TOKEN_ID),
         "non_target_token_count": checkpoint.get("non_target_token_count", 1),
         "alpha_mode": checkpoint["alpha_mode"],
         "optimizer_updates": checkpoint.get("optimizer_updates"),
