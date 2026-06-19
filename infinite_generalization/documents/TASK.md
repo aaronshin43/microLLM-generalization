@@ -1,37 +1,184 @@
-# Task: Stage 3C+D Sanity Check
+# Task: Stage 3E Multiple Target Token Types
 
 ## Objective
 
-Stage 3C+D is a short sanity check that combines the two already completed Stage 3 extensions:
+Stage 3E tests whether the reduced Stage 3 length-aware attention model can learn a **target class detector**, not just a detector for one specific target token.
 
-- Stage 3C: the target token can appear at any non-final position.
-- Stage 3D: the sequence can contain multiple non-target token types.
+Previous Stage 3 experiments used one target token type:
 
-The goal is not to open a new major research direction. The goal is to confirm that the Stage 3D result is not an artifact of always placing the target at position 0.
-
-The expected outcome is simple:
-
-**Adding target-anywhere placement to the multiple-non-target setup should not substantially change the Stage 3D conclusions.**
-
-This expectation follows from the reduced model design. The model has no positional encoding, so target position should not affect the attention score assigned to the target token. The main remaining difficulty should still be the multiple-non-target denominator and the worst-case target-vs-non-target margin.
-
-## Background
-
-Stage 3C showed that target position did not meaningfully affect behavior when there was only one non-target token type.
-
-Stage 3D showed that the reduced model can handle multiple non-target token types without collapsing all non-target attention scores into one shared score. The relevant generalized bottleneck was:
-
-```math
-\Delta_{\min}=\min_{r,k}(a_r-b_{r,k}),
+```text
+target token: t
 ```
 
-where:
+Stage 3E changes this to a target set:
 
-- $r$ is the final readout non-target token type.
-- $a_r$ is the target key score under final query type $r$.
-- $b_{r,k}$ is the score for non-target token type $k$ under final query type $r$.
+```text
+target tokens: t_1, t_2, ..., t_H
+```
 
-For learned-log attention,
+The binary task is unchanged:
+
+```text
+positive: the sequence contains one token from the target set
+negative: the sequence contains no token from the target set
+```
+
+For the first Stage 3E pass, each positive example should contain exactly one target token, and each negative example should contain zero target tokens.
+
+The central question is:
+
+**Can the reduced model learn to detect a class of target tokens, and is long-length behavior controlled by the weakest target type?**
+
+## Why This Comes Next
+
+Stage 3D increased non-target-side complexity by adding multiple non-target token types.
+
+Stage 3E increases target-side complexity by adding multiple target token types.
+
+This is a more realistic existential task. Many real binary detection tasks ask whether a sequence contains any token from a target category, not only whether it contains one specific token.
+
+## Controlled First Setup
+
+The first Stage 3E experiment should isolate the new variable:
+
+```text
+multiple target token types
+single non-target token type
+target fixed at position 0
+```
+
+Use:
+
+```text
+target_token_count = 3
+non_target_token_count = 1
+target_position_mode = fixed_start
+```
+
+Do not combine Stage 3E with target-anywhere placement or multiple non-target token types in the first pass. Those are follow-up checks.
+
+This keeps the theory simple and makes it easier to tell whether any failure comes from multiple target types rather than from position or non-target variation.
+
+## Token Convention
+
+Use contiguous token ids:
+
+```text
+target token ids: 0, 1, ..., H-1
+non-target token ids: H, H+1, ..., H+M-1
+```
+
+For the first pass:
+
+```text
+H = 3
+M = 1
+```
+
+So:
+
+```text
+target token ids: 0, 1, 2
+non-target token id: 3
+```
+
+## Input Distribution
+
+### Positive Inputs
+
+Each positive example contains exactly one target token at position 0:
+
+```text
+t_h, u, u, ..., u
+```
+
+where $t_h$ is sampled uniformly from the target token set.
+
+### Negative Inputs
+
+Each negative example contains only the non-target token:
+
+```text
+u, u, u, ..., u
+```
+
+### Later Follow-Ups
+
+After the controlled first pass, possible follow-ups are:
+
+- multiple target types with multiple non-target types
+- multiple target types with target-anywhere placement
+- multiple target types with both target-anywhere placement and multiple non-target types
+
+These should not be included in the first Stage 3E implementation unless the base result is already understood.
+
+## Representation Design
+
+As in Stage 3D, separate:
+
+1. the representation used to compute query/key attention scores
+2. the value representation averaged by attention
+
+The score representation should distinguish all token ids:
+
+```text
+t_1, ..., t_H, u_1, ..., u_M
+```
+
+The attention value mapping should remain binary:
+
+```math
+t_h \mapsto [1,0],
+\qquad
+u_k \mapsto [0,1].
+```
+
+All target token types share the same value meaning: target evidence.
+
+All non-target token types share the same value meaning: non-target evidence.
+
+This keeps the attention output interpretable as:
+
+```math
+(p_{\mathrm{target}},1-p_{\mathrm{target}}).
+```
+
+For the first Stage 3E pass, positive examples contain exactly one target token, so $p_{\mathrm{target}}$ is simply the attention mass on that target position.
+
+## Theory
+
+In the controlled first setup, there is only one non-target token type and the final query is always the non-target query. Therefore, the score row for a positive example with target type $h$ is:
+
+```math
+S_n^{(h)}=(a_h,b,b,\ldots,b).
+```
+
+Variables:
+
+- $h$ is the target token type.
+- $a_h$ is the target key score for target type $h$.
+- $b$ is the non-target key score.
+- $\Delta_h=a_h-b$ is the target-vs-non-target margin for target type $h$.
+
+The target attention mass is:
+
+```math
+p_t(n\mid h)
+=
+\frac{e^{\alpha a_h}}
+{e^{\alpha a_h}+(n-1)e^{\alpha b}}
+=
+\frac{1}
+{1+(n-1)e^{-\alpha\Delta_h}}.
+```
+
+The bottleneck is the target type with the smallest margin:
+
+```math
+\Delta_{\min}=\min_h \Delta_h.
+```
+
+For learned-log attention:
 
 ```math
 \alpha=1+c\log(1+n),
@@ -43,110 +190,89 @@ the asymptotic diagnostic is:
 c\Delta_{\min}>1.
 ```
 
-Stage 3C+D keeps this same theory, but removes the fixed target-at-position-0 simplification.
+The key new question is whether all target token types get sufficiently large margins, or whether one weak target type controls long-length failure.
 
-## Scope
+## Required Implementation Changes
 
-This is a sanity check, not a full new stage.
-
-Use the existing implementation:
+Primary file:
 
 ```text
 infinite_generalization/src/stage3_simplified_attention.py
 ```
 
-Do not add new architecture components.
+### Step 1: Add Target Token Count
 
-Do not add positional encoding.
-
-Do not change the binary target-present classification task.
-
-Do not run a large grid unless the sanity check produces surprising results.
-
-## Experimental Design
-
-Use:
+Add a CLI/config option:
 
 ```text
-target_position_mode = nonfinal_random
-non_target_sampling = uniform
+--target-token-count 1
 ```
 
-Positive examples:
+Default:
 
 ```text
-u_{i_0}, ..., t, ..., u_{i_{n-1}}
+1
 ```
 
-with exactly one target token sampled from non-final positions:
+This preserves existing Stage 3 behavior.
+
+### Step 2: Update Token Id Convention
+
+When `target_token_count=H` and `non_target_token_count=M`:
+
+```text
+target ids = 0 ... H-1
+non-target ids = H ... H+M-1
+```
+
+Existing Stage 3D behavior with one target token should remain equivalent when:
+
+```text
+target_token_count = 1
+```
+
+### Step 3: Update Dataset Generation
+
+Required behavior:
+
+- positives contain exactly one target token
+- positive target token id is sampled uniformly from target ids
+- negatives contain zero target tokens
+- non-target positions are sampled from non-target ids
+- `target_position_mode=fixed_start` places the sampled target at position 0
+- `target_position_mode=nonfinal_random` should still work later, but is not required for the first Stage 3E run
+
+The dataset should return both:
+
+```text
+target_positions
+target_token_ids
+```
+
+For negative examples:
+
+```text
+target_position = -1
+target_token_id = -1
+```
+
+### Step 4: Update Value Mapping
+
+The fixed attention value mapping should be:
 
 ```math
-p\in\{0,1,\ldots,n-2\}.
+\mathrm{value}(x)=
+\begin{cases}
+[1,0], & x \in \text{target ids} \\
+[0,1], & x \in \text{non-target ids}.
+\end{cases}
 ```
 
-The final token remains non-target so the readout query is still a non-target query.
+The classifier input should remain 2-dimensional.
 
-Negative examples:
+### Step 5: Preserve Existing Metrics
 
-```text
-u_{i_0},u_{i_1},\ldots,u_{i_{n-1}}.
-```
-
-The non-target token ids are sampled uniformly from:
-
-```text
-1, 2, ..., m
-```
-
-where $m$ is `non_target_token_count`.
-
-## Main Run Set
-
-Use `non_target_token_count=4` as the main sanity-check condition because it matches the Stage 3D main experiment.
-
-Run only the representative conditions:
-
-| Run | Alpha mode | Max train steps | Purpose |
-|---|---|---:|---|
-| `constant_e100_nt4_target_anywhere` | `constant` | 3200 | should still fail at long length |
-| `log_e50_nt4_target_anywhere` | `log` | 1600 | should still succeed if worst-case margins remain above 1 |
-| `learned_log_e200_nt4_target_anywhere` | `learned_log` | 6400 | should still satisfy $c\Delta_{\min}>1$ |
-
-Recommended output root:
-
-```text
-runs/stage3cd_target_anywhere_multi_nontarget/
-```
-
-## Commands
-
-Run from:
-
-```text
-infinite_generalization/
-```
-
-### Constant Multiplier
-
-```powershell
-$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --alpha-mode constant --target-position-mode nonfinal_random --non-target-token-count 4 --train-lengths 10 --test-examples 50 --eval-batch-size 8 --max-train-steps 3200 --output-dir runs/stage3cd_target_anywhere_multi_nontarget/constant_e100_nt4_target_anywhere
-```
-
-### Fixed Log Multiplier
-
-```powershell
-$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --alpha-mode log --target-position-mode nonfinal_random --non-target-token-count 4 --train-lengths 10 --test-examples 50 --eval-batch-size 8 --max-train-steps 1600 --output-dir runs/stage3cd_target_anywhere_multi_nontarget/log_e50_nt4_target_anywhere
-```
-
-### Learned-Log Multiplier
-
-```powershell
-$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --alpha-mode learned_log --target-position-mode nonfinal_random --non-target-token-count 4 --train-lengths 10 --test-examples 50 --eval-batch-size 8 --max-train-steps 6400 --output-dir runs/stage3cd_target_anywhere_multi_nontarget/learned_log_e200_nt4_target_anywhere
-```
-
-## Metrics To Inspect
-
-Use the existing CSV outputs:
+Keep existing outputs:
 
 ```text
 metrics_by_length.csv
@@ -154,110 +280,209 @@ non_target_type_metrics.csv
 target_position_metrics.csv
 ```
 
-Main metrics:
-
-- positive accuracy by length
-- mean positive logit by length
-- empirical target attention by length
-- mean $\Delta_{\min}$
-- worst observed $\Delta_{\min}$
-- mean and worst observed $c\Delta_{\min}$ for learned-log
-- non-target type-score standard deviation
-- denominator-dominant non-target token type
-- target-position bucket accuracy and margin
-
-## Key Questions
-
-### 1. Does Target Position Change The Stage 3D Outcome?
-
-Expected answer:
-
-No. The results should be close to the fixed-start Stage 3D runs.
-
-### 2. Does Any Target-Position Bucket Fail Earlier?
-
-Check:
+Existing Stage 3, Stage 3C, and Stage 3D commands should continue to work with default:
 
 ```text
-target_position_metrics.csv
+--target-token-count 1
 ```
 
-Compare:
+### Step 6: Add Target-Type Metrics
 
-- `beginning`
-- `middle`
-- `end_nonfinal`
-
-Expected answer:
-
-No bucket should behave meaningfully differently, except for numerical noise and finite-sample variation.
-
-### 3. Does The Multiple Non-Target Bottleneck Remain The Main Difficulty?
-
-Check:
+Add:
 
 ```text
-non_target_type_metrics.csv
+target_type_metrics.csv
 ```
 
-Expected answer:
+Each row should include:
 
-Yes. The relevant bottleneck should still be the hardest final-query/non-target-key margin, not the target position.
+```text
+length
+split
+alpha_mode
+target_token_count
+non_target_token_count
+target_position_mode
+final_query_token_id
+target_token_id
+positive_examples
+positive_accuracy
+mean_target_score
+mean_target_attention
+mean_min_margin
+worst_observed_min_margin
+mean_c_delta_min
+worst_observed_c_delta_min
+```
 
-### 4. Does Learned-Log Still Cross The Threshold?
+Important:
 
-For `learned_log_e200_nt4_target_anywhere`, check:
+`final_query_token_id` should be included even though the first controlled setup has only one non-target token type. This keeps the metric schema compatible with later Stage 3E follow-ups that add multiple non-target token types or target-anywhere placement.
+
+### Step 7: Add Aggregate Target-Class Diagnostics
+
+In `metrics_by_length.csv`, add or preserve aggregate diagnostics:
+
+```text
+mean_min_margin_delta
+min_margin_delta
+learned_log_c_delta_min_mean
+learned_log_c_delta_min_worst
+```
+
+For Stage 3E, these should aggregate over positive examples and therefore include target-type variation.
+
+## Smoke Test
+
+Run a small smoke test:
+
+```powershell
+$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --smoke-test --alpha-mode learned_log --target-token-count 3 --non-target-token-count 1 --output-dir runs/stage3e_multiple_targets/smoke
+```
+
+Expected:
+
+- `model.pt` is created
+- `metrics_by_length.csv` is created
+- `target_type_metrics.csv` is created
+- positives contain exactly one target token
+- negatives contain zero target tokens
+- all target token ids appear in positive examples
+- no unexpected NaN appears in key metrics
+- default `target_token_count=1` still works
+
+## Main Runs
+
+Use the representative conditions:
+
+```text
+target_token_count = 3
+non_target_token_count = 1
+target_position_mode = fixed_start
+train_lengths = [10]
+test_examples = 50
+eval_batch_size = 8
+```
+
+Output root:
+
+```text
+runs/stage3e_multiple_targets/
+```
+
+Run:
+
+| Run | Alpha mode | Max train steps | Purpose |
+|---|---|---:|---|
+| `constant_e100_t3_nt1` | `constant` | 3200 | check whether constant multiplier still fails |
+| `log_e50_t3_nt1` | `log` | 1600 | check whether fixed log succeeds when every target margin is above 1 |
+| `learned_log_e200_t3_nt1` | `learned_log` | 6400 | check whether learned-log reaches $c\Delta_{\min}>1$ |
+
+## Analysis Questions
+
+### 1. Does The Model Learn A Target Class Detector?
+
+Check whether all target token types have high positive accuracy near training length and at long lengths.
+
+### 2. Is One Target Type Weaker?
+
+Use:
+
+```text
+target_type_metrics.csv
+```
+
+Look for the target token type with the smallest margin:
 
 ```math
-c\Delta_{\min}>1.
+\arg\min_h \Delta_h.
 ```
 
-Expected answer:
+### 3. Does Long-Length Behavior Follow The Smallest Target Margin?
 
-Yes, if the run behaves like the Stage 3D fixed-start result.
+For learned-log, check:
 
-## Interpretation Rules
+```math
+c\min_h\Delta_h>1.
+```
 
-If results match Stage 3D:
+If one target type has $c\Delta_h<1$, it may become the first positive subtype to fail at long length.
 
-**Treat Stage 3C+D as a control result.** It confirms that fixing the target at position 0 was not driving the Stage 3D conclusions.
+### 4. Does Fixed Log Still Work?
 
-If target-position buckets differ:
+For fixed log:
 
-Inspect whether the difference is caused by finite sample noise, target position, or interaction with final readout query type.
+```math
+\alpha=\log n.
+```
 
-If learned-log no longer crosses the threshold:
+Expected success condition:
 
-Rerun with a different seed before drawing conclusions. This task is small enough that one seed should not be overinterpreted.
+```math
+\Delta_{\min}>1.
+```
+
+### 5. Does Constant Multiplier Still Fail?
+
+Expected:
+
+Constant multiplier may fit training length but should still fail at sufficiently long length because fixed margins do not scale with $\log n$.
+
+## Expected Outcomes
+
+### Outcome A: Target Scores Collapse
+
+All target types receive nearly identical target scores.
+
+Interpretation:
+
+The model learns a shared target-class representation at the attention-score level.
+
+### Outcome B: Target Scores Differ But All Margins Are Large Enough
+
+Target scores differ, but the smallest target margin remains sufficient.
+
+Interpretation:
+
+Exact target-score collapse is not necessary. The relevant diagnostic is the smallest target-vs-non-target margin.
+
+### Outcome C: One Weak Target Type Controls Failure
+
+One target type has a much smaller margin.
+
+Interpretation:
+
+The target class is only as robust as its weakest target type.
 
 ## Reporting Plan
 
-Do not create a large standalone report unless the result is surprising.
+Create a dedicated Stage 3E report if results are nontrivial:
 
-Preferred reporting:
+```text
+infinite_generalization/documents/STAGE3E_MULTIPLE_TARGET_TOKENS.md
+```
 
-- Add a short Stage 3C+D subsection to `STAGE3D_MULTIPLE_NON_TARGET_TOKENS.md`, or
-- Add a short note to the main Stage 3 report.
+The report should explain:
 
-The report should state:
-
-- this was a sanity check
-- the target was sampled from non-final positions
-- multiple non-target token types were still present
-- whether the results matched Stage 3D
-- whether target-position buckets behaved similarly
+- why Stage 3E isolates target-side complexity
+- whether the model learns a target class detector
+- whether target token types collapse or remain distinct
+- which target type has the smallest margin
+- whether learned-log reaches $c\Delta_{\min}>1$
 
 ## Success Criteria
 
 This task is complete when:
 
-- the three sanity-check runs finish
-- required CSV files are produced
-- target-position bucket metrics are inspected
-- the result is summarized briefly in the documentation
+- `--target-token-count` is implemented
+- existing Stage 3 behavior is preserved by default
+- `target_type_metrics.csv` is produced
+- smoke tests pass
+- the three main Stage 3E runs complete
+- target-type results are analyzed
 
 ## Expected Conclusion
 
-The expected conclusion is:
+The likely conclusion is:
 
-**Stage 3C+D does not materially change the Stage 3D result. Target position remains unimportant in the reduced no-positional-encoding model, while the multiple-non-target worst-case margin remains the meaningful diagnostic.**
+**Stage 3E should preserve the same softmax dilution mechanism, but the bottleneck should move from a single target-vs-non-target margin to the target token type with the smallest margin.**
