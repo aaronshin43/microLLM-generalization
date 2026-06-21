@@ -341,6 +341,86 @@ For `learned_log_e200`:
 
 Both dimensions contribute positively. This means the final non-target query $q_u$ is aligned with the target-minus-non-target key direction $k_t-k_u$ in both hidden dimensions.
 
+## Geometric View Of The Learned Mechanism
+
+The score calculation above can be read geometrically.
+
+The final query vector is:
+
+```math
+q_u=
+\begin{bmatrix}
+2.1707 \\
+1.8260
+\end{bmatrix}.
+```
+
+The target key vector is:
+
+```math
+k_t=
+\begin{bmatrix}
+1.5457 \\
+1.4076
+\end{bmatrix},
+```
+
+while the non-target key vector is:
+
+```math
+k_u=
+\begin{bmatrix}
+-1.5580 \\
+-1.3366
+\end{bmatrix}.
+```
+
+Geometrically, $q_u$ points in almost the same direction as $k_t$, but in almost the opposite direction from $k_u$. Therefore:
+
+```math
+q_u^\top k_t > 0,
+\qquad
+q_u^\top k_u < 0.
+```
+
+This is why the target score becomes strongly positive:
+
+```math
+a \approx 4.1900,
+```
+
+while the non-target score becomes strongly negative:
+
+```math
+b \approx -4.1171.
+```
+
+In this sense, the model succeeds because the learned query-key geometry makes the target key much more detectable from the final non-target query. The final query does not simply compare token identities directly; it projects both keys onto its own direction. Along that query direction, the target key lies on the positive side and the non-target key lies on the negative side.
+
+The same mechanism is also visible from the difference-vector form:
+
+```math
+\Delta
+=
+\frac{q_u^\top(k_t-k_u)}{\sqrt d}.
+```
+
+Here $k_t-k_u$ is the direction that separates the target key from the non-target key. Since $q_u$ aligns positively with this separating direction, both hidden dimensions contribute positively to the margin. This produces a large positive $\Delta$, which is the raw target-vs-non-target score advantage used by the attention softmax.
+
+Thus, the learned weight-level mechanism can be summarized as:
+
+```math
+q_u \text{ aligns with } k_t-k_u.
+```
+
+This alignment creates the score pattern:
+
+```math
+a \gg b,
+```
+
+so the target token receives a much larger attention score than each non-target token before the length-dependent multiplier is applied.
+
 ## Interpretation
 
 The mechanism is simple:

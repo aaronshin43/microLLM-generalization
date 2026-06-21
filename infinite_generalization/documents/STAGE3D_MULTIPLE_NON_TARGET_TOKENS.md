@@ -130,6 +130,59 @@ c\min_{r,k}\Delta_{r,k}>1.
 
 This is the Stage 3D analogue of the original Stage 3 condition $c\Delta>1$.
 
+## Geometric Interpretation Of The Margins
+
+The margin $\Delta_{r,k}$ has a direct query-key geometric interpretation.
+
+For final non-target query type $r$ and non-target key type $k$:
+
+```math
+q_r = W_Q x_{u_r},
+\qquad
+k_t = W_K x_t,
+\qquad
+k_{u_k} = W_K x_{u_k}.
+```
+
+Here:
+
+- $q_r$ is the final query vector when the last token is non-target type $u_r$.
+- $k_t$ is the target key vector.
+- $k_{u_k}$ is the key vector for non-target type $u_k$.
+- $W_Q$ and $W_K$ are the learned query and key projection matrices.
+- $x_t$ and $x_{u_k}$ are the input representations for the target token and non-target token $u_k$.
+
+The target score and non-target score are:
+
+```math
+a_r = \frac{q_r \cdot k_t}{\sqrt d},
+\qquad
+b_{r,k} = \frac{q_r \cdot k_{u_k}}{\sqrt d}.
+```
+
+Therefore:
+
+```math
+\Delta_{r,k}
+=
+a_r-b_{r,k}
+=
+\frac{q_r \cdot (k_t-k_{u_k})}{\sqrt d}.
+```
+
+This means target detectability is not determined by the raw distance between the target key vector and a non-target key vector alone. What matters for attention is whether the final query vector $q_r$ aligns with the target-minus-non-target key direction $k_t-k_{u_k}$.
+
+If $q_r$ points strongly in the direction of $k_t-k_{u_k}$, then the target receives a larger attention score than non-target type $u_k$. If this projected difference is small, the target and that non-target type are difficult to distinguish under final query type $r$, even if their raw key vectors are different.
+
+Thus, the relevant geometric bottleneck is:
+
+```math
+\min_{r,k}
+\frac{q_r \cdot (k_t-k_{u_k})}{\sqrt d}.
+```
+
+This is why Stage 3D focuses on the worst final-query / non-target-key margin rather than only the average margin.
+
 ## Setup
 
 This report analyzes the Stage 3D main condition:
@@ -340,6 +393,8 @@ Aggregated over sampled last-token types, token id `3` is the dominant non-targe
 | `learned_log_e200_nt4` | 3 | 8.637 | 0.625 |
 
 Token id `3` takes the largest share of the non-target denominator. This is not because it appears much more often since non-target tokens were sampled uniformly. It happens because its score is closest to the target score on average.
+
+Equivalently, token id `3` has the smallest projected query-key margin on average. The denominator-dominant non-target type is not necessarily the type whose raw key vector is closest to the target key vector; it is the type whose target-minus-non-target key direction is weakest under the relevant final queries.
 
 I also checked the saved checkpoint weights directly. For each last-token type $r\in\{1,2,3,4\}$, I computed the margins:
 
