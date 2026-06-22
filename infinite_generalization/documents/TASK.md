@@ -1,488 +1,531 @@
-# Task: Stage 3E Multiple Target Token Types
+# Task: Stage 3 Evaluation Reliability
 
 ## Objective
 
-Stage 3E tests whether the reduced Stage 3 length-aware attention model can learn a **target class detector**, not just a detector for one specific target token.
+Improve the reliability of Stage 3 evaluation for the Stage 3C, Stage 3D, and Stage 3E variants.
 
-Previous Stage 3 experiments used one target token type:
-
-```text
-target token: t
-```
-
-Stage 3E changes this to a target set:
+The current Stage 3 evaluation commonly uses:
 
 ```text
-target tokens: t_1, t_2, ..., t_H
+test_examples = 50
 ```
 
-The binary task is unchanged:
+This means each evaluation length receives only 50 examples. Because the dataset is balanced, this is only 25 positive examples and 25 negative examples per length.
+
+This is enough to detect large effects, such as:
 
 ```text
-positive: the sequence contains one token from the target set
-negative: the sequence contains no token from the target set
+constant multiplier fails at long length
+fixed-log multiplier succeeds
+sufficiently trained learned-log multiplier succeeds
 ```
 
-For the first Stage 3E pass, each positive example should contain exactly one target token, and each negative example should contain zero target tokens.
-
-The central question is:
-
-**Can the reduced model learn to detect a class of target tokens, and is long-length behavior controlled by the weakest target type?**
-
-## Why This Comes Next
-
-Stage 3D increased non-target-side complexity by adding multiple non-target token types.
-
-Stage 3E increases target-side complexity by adding multiple target token types.
-
-This is a more realistic existential task. Many real binary detection tasks ask whether a sequence contains any token from a target category, not only whether it contains one specific token.
-
-## Controlled First Setup
-
-The first Stage 3E experiment should isolate the new variable:
+However, it is not enough to make strong claims about finer diagnostic slices, such as:
 
 ```text
-multiple target token types
-single non-target token type
-target fixed at position 0
+target position bucket
+target token type
+final query non-target token type
+worst-case margin by token type
 ```
 
-Use:
+The goal of this task is to add:
+
+1. chunked evaluation, so `test_examples` can be increased without causing memory overload
+2. optional stratified evaluation, so diagnostic slices are more balanced
+3. tests that verify the new evaluation path is correct
+4. rerun comparisons showing how much the old Stage 3C/D/E conclusions change under stronger evaluation
+
+The final research question is:
+
+**If we rerun Stage 3C, Stage 3D, and Stage 3E with larger and/or stratified evaluation sets, do the main conclusions remain the same?**
+
+## Motivation
+
+For very long sequences, memory usage is dominated by the generated input tensor.
+
+For example, at length 10M:
 
 ```text
-target_token_count = 3
-non_target_token_count = 1
-target_position_mode = fixed_start
+50 examples * 10,000,000 tokens * 8 bytes per int64 token ≈ 4 GB
 ```
 
-Do not combine Stage 3E with target-anywhere placement or multiple non-target token types in the first pass. Those are follow-up checks.
+This does not include extra copies made during concatenation, permutation, batching, attention-score computation, or intermediate tensors.
 
-This keeps the theory simple and makes it easier to tell whether any failure comes from multiple target types rather than from position or non-target variation.
+Increasing `test_examples` directly from 50 to 500 or 1000 can therefore cause memory problems.
 
-## Token Convention
-
-Use contiguous token ids:
+Instead, evaluation should treat `test_examples` as the total number of examples to evaluate and process them in smaller chunks:
 
 ```text
-target token ids: 0, 1, ..., H-1
-non-target token ids: H, H+1, ..., H+M-1
+test_examples = 1000
+eval_chunk_examples = 50
 ```
 
-For the first pass:
+This evaluates 1000 examples in total, but only holds 50 generated examples in memory at a time.
+
+## Current Evaluation Behavior
+
+Current Stage 3 evaluation calls `make_two_token_dataset()` once per evaluation length.
+
+For each length:
 
 ```text
-H = 3
-M = 1
+positive_count = examples // 2
+negative_count = examples - positive_count
 ```
 
-So:
+The generated dataset is deterministic because the seed is fixed:
 
 ```text
-target token ids: 0, 1, 2
-non-target token id: 3
+seed = config.seed + 10000 + length
 ```
 
-## Input Distribution
+This means the evaluation is reproducible, but it is still randomly sampled.
 
-### Positive Inputs
-
-Each positive example contains exactly one target token at position 0:
+For Stage 3C:
 
 ```text
-t_h, u, u, ..., u
+target_position_mode = nonfinal_random
 ```
 
-where $t_h$ is sampled uniformly from the target token set.
+positive target positions are sampled randomly from non-final positions.
 
-### Negative Inputs
-
-Each negative example contains only the non-target token:
+For Stage 3D:
 
 ```text
-u, u, u, ..., u
+non_target_token_count > 1
 ```
 
-### Later Follow-Ups
+non-target token ids are sampled uniformly at each non-target position.
 
-After the controlled first pass, possible follow-ups are:
-
-- multiple target types with multiple non-target types
-- multiple target types with target-anywhere placement
-- multiple target types with both target-anywhere placement and multiple non-target types
-
-These should not be included in the first Stage 3E implementation unless the base result is already understood.
-
-## Representation Design
-
-As in Stage 3D, separate:
-
-1. the representation used to compute query/key attention scores
-2. the value representation averaged by attention
-
-The score representation should distinguish all token ids:
+For Stage 3E:
 
 ```text
-t_1, ..., t_H, u_1, ..., u_M
+target_token_count > 1
 ```
 
-The attention value mapping should remain binary:
+positive target token ids are sampled uniformly from the target token set.
 
-```math
-t_h \mapsto [1,0],
-\qquad
-u_k \mapsto [0,1].
-```
+The issue is not reproducibility. The issue is small sample size per diagnostic slice.
 
-All target token types share the same value meaning: target evidence.
+## Desired Evaluation Interface
 
-All non-target token types share the same value meaning: non-target evidence.
-
-This keeps the attention output interpretable as:
-
-```math
-(p_{\mathrm{target}},1-p_{\mathrm{target}}).
-```
-
-For the first Stage 3E pass, positive examples contain exactly one target token, so $p_{\mathrm{target}}$ is simply the attention mass on that target position.
-
-## Theory
-
-In the controlled first setup, there is only one non-target token type and the final query is always the non-target query. Therefore, the score row for a positive example with target type $h$ is:
-
-```math
-S_n^{(h)}=(a_h,b,b,\ldots,b).
-```
-
-Variables:
-
-- $h$ is the target token type.
-- $a_h$ is the target key score for target type $h$.
-- $b$ is the non-target key score.
-- $\Delta_h=a_h-b$ is the target-vs-non-target margin for target type $h$.
-
-The target attention mass is:
-
-```math
-p_t(n\mid h)
-=
-\frac{e^{\alpha a_h}}
-{e^{\alpha a_h}+(n-1)e^{\alpha b}}
-=
-\frac{1}
-{1+(n-1)e^{-\alpha\Delta_h}}.
-```
-
-The bottleneck is the target type with the smallest margin:
-
-```math
-\Delta_{\min}=\min_h \Delta_h.
-```
-
-For learned-log attention:
-
-```math
-\alpha=1+c\log(1+n),
-```
-
-the asymptotic diagnostic is:
-
-```math
-c\Delta_{\min}>1.
-```
-
-The key new question is whether all target token types get sufficiently large margins, or whether one weak target type controls long-length failure.
-
-## Required Implementation Changes
-
-Primary file:
+Add the following config/CLI options to `stage3_simplified_attention.py`:
 
 ```text
-infinite_generalization/src/stage3_simplified_attention.py
+--test-examples INT
+--eval-chunk-examples INT
+--eval-sampling-mode random|stratified
 ```
 
-### Step 1: Add Target Token Count
-
-Add a CLI/config option:
+Definitions:
 
 ```text
---target-token-count 1
+test_examples
 ```
 
-Default:
+Total number of examples evaluated per length.
 
 ```text
-1
+eval_chunk_examples
 ```
 
-This preserves existing Stage 3 behavior.
-
-### Step 2: Update Token Id Convention
-
-When `target_token_count=H` and `non_target_token_count=M`:
+Maximum number of examples generated and evaluated at once.
 
 ```text
-target ids = 0 ... H-1
-non-target ids = H ... H+M-1
+eval_sampling_mode
 ```
 
-Existing Stage 3D behavior with one target token should remain equivalent when:
+Controls whether evaluation examples are generated by the current random sampler or by a diagnostic stratified sampler.
+
+Recommended defaults:
 
 ```text
-target_token_count = 1
+test_examples = 50
+eval_chunk_examples = 50
+eval_sampling_mode = random
 ```
 
-### Step 3: Update Dataset Generation
+These defaults preserve current behavior.
 
-Required behavior:
+## Chunked Evaluation Design
 
-- positives contain exactly one target token
-- positive target token id is sampled uniformly from target ids
-- negatives contain zero target tokens
-- non-target positions are sampled from non-target ids
-- `target_position_mode=fixed_start` places the sampled target at position 0
-- `target_position_mode=nonfinal_random` should still work later, but is not required for the first Stage 3E run
+### High-Level Behavior
 
-The dataset should return both:
+For each evaluation length:
 
 ```text
-target_positions
-target_token_ids
+remaining_examples = test_examples
+chunk_index = 0
+
+while remaining_examples > 0:
+    chunk_examples = min(eval_chunk_examples, remaining_examples)
+    evaluate one chunk
+    accumulate metrics
+    remaining_examples -= chunk_examples
+    chunk_index += 1
 ```
 
-For negative examples:
+Each chunk should use a deterministic seed:
 
 ```text
-target_position = -1
-target_token_id = -1
+chunk_seed = base_eval_seed + chunk_index
 ```
 
-### Step 4: Update Value Mapping
-
-The fixed attention value mapping should be:
-
-```math
-\mathrm{value}(x)=
-\begin{cases}
-[1,0], & x \in \text{target ids} \\
-[0,1], & x \in \text{non-target ids}.
-\end{cases}
-```
-
-The classifier input should remain 2-dimensional.
-
-### Step 5: Preserve Existing Metrics
-
-Keep existing outputs:
+where:
 
 ```text
+base_eval_seed = config.seed + 10000 + length
+```
+
+### Metric Accumulation
+
+Do not store full input tensors across chunks.
+
+For each chunk:
+
+1. generate the chunk dataset
+2. run model evaluation
+3. extract per-example scalar diagnostics
+4. move those diagnostics to CPU
+5. release the chunk tensors
+
+The final length-level metrics should be computed from accumulated scalar values, not from stored token tensors.
+
+Acceptable accumulated values include:
+
+```text
+correct_count
+positive_correct_count
+negative_correct_count
+logit_sum
+probability_sum
+target_attention_sum
+margin_sum
+min_margin_sum
+count
+```
+
+For diagnostic slice CSVs, accumulate per-slice sums and counts, then write one row per final slice.
+
+### Compatibility Requirement
+
+If:
+
+```text
+eval_chunk_examples >= test_examples
+eval_sampling_mode = random
+```
+
+then the new path should match the old single-dataset evaluation behavior.
+
+This is important for regression testing.
+
+## Stratified Evaluation Design
+
+Stratified evaluation should be optional.
+
+The first implementation does not need to cover every possible stratum perfectly. It should focus on the diagnostic slices that are currently most vulnerable to random imbalance.
+
+### Required Stratification Targets
+
+When applicable, stratify positive examples over:
+
+```text
+target position bucket
+target token id
+final query non-target token id
+```
+
+### Stage 3C: Target Position Stratification
+
+When:
+
+```text
+target_position_mode = nonfinal_random
+```
+
+positive examples should be distributed as evenly as possible over:
+
+```text
+beginning
+middle
+end_nonfinal
+```
+
+This makes `target_position_metrics.csv` more reliable.
+
+Within each bucket, target positions can still be sampled randomly.
+
+### Stage 3D: Final Query Type Stratification
+
+When:
+
+```text
+non_target_token_count > 1
+```
+
+positive examples should be distributed as evenly as possible over the final query non-target token id.
+
+The final query token is the token at the last sequence position. In the reduced Stage 3 model, classification reads from the last token output, so the final token type defines the readout query condition.
+
+This makes worst-case non-target-type analysis more reliable.
+
+### Stage 3E: Target Token Type Stratification
+
+When:
+
+```text
+target_token_count > 1
+```
+
+positive examples should be distributed as evenly as possible over target token id.
+
+This makes `target_type_metrics.csv` more reliable.
+
+### Combined Stage 3C+D+E Stratification
+
+When multiple stratification dimensions are active, use the Cartesian product of active strata:
+
+```text
+target position bucket
+final query non-target token id
+target token id
+```
+
+For example, if:
+
+```text
+3 position buckets
+4 final query token types
+3 target token types
+```
+
+then there are:
+
+```text
+3 * 4 * 3 = 36 positive strata
+```
+
+Positive examples should be distributed as evenly as possible across these 36 strata.
+
+If the requested positive example count is not divisible by the number of strata, distribute the remainder deterministically.
+
+### Negative Examples
+
+Negative examples do not have target position or target token id.
+
+For Stage 3D-style settings, negative examples should still be balanced over final query non-target token id when:
+
+```text
+non_target_token_count > 1
+```
+
+This makes negative behavior under each final query type easier to inspect.
+
+## Implementation Plan
+
+### Step 1: Add Evaluation Config Options
+
+Update `Stage3Config` and CLI parsing with:
+
+```text
+eval_chunk_examples: int = 50
+eval_sampling_mode: str = "random"
+```
+
+Validate:
+
+```text
+eval_chunk_examples >= 1
+eval_sampling_mode in {"random", "stratified"}
+```
+
+Write these values into:
+
+```text
+config.json
 metrics_by_length.csv
-non_target_type_metrics.csv
 target_position_metrics.csv
-```
-
-Existing Stage 3, Stage 3C, and Stage 3D commands should continue to work with default:
-
-```text
---target-token-count 1
-```
-
-### Step 6: Add Target-Type Metrics
-
-Add:
-
-```text
+non_target_type_metrics.csv
 target_type_metrics.csv
 ```
 
-Each row should include:
+where appropriate.
+
+### Step 2: Refactor Evaluation Into Chunked Evaluation
+
+Refactor `evaluate_length()` so that it no longer assumes all evaluation examples are generated at once.
+
+Recommended structure:
 
 ```text
-length
-split
-alpha_mode
-target_token_count
-non_target_token_count
-target_position_mode
-final_query_token_id
-target_token_id
-positive_examples
-positive_accuracy
-mean_target_score
-mean_target_attention
-mean_min_margin
-worst_observed_min_margin
-mean_c_delta_min
-worst_observed_c_delta_min
+evaluate_length()
+    initialize accumulators
+    for each eval chunk:
+        generate chunk
+        evaluate chunk
+        update accumulators
+    finalize accumulated metrics
 ```
 
-Important:
+Keep the existing output CSV schemas unless a new column is clearly needed.
 
-`final_query_token_id` should be included even though the first controlled setup has only one non-target token type. This keeps the metric schema compatible with later Stage 3E follow-ups that add multiple non-target token types or target-anywhere placement.
+### Step 3: Preserve Random Evaluation Semantics
 
-### Step 7: Add Aggregate Target-Class Diagnostics
+For `eval_sampling_mode=random`, reuse the current sampling logic.
 
-In `metrics_by_length.csv`, add or preserve aggregate diagnostics:
+The only behavior change should be that examples can be split across chunks.
+
+Regression check:
 
 ```text
-mean_min_margin_delta
-min_margin_delta
-learned_log_c_delta_min_mean
-learned_log_c_delta_min_worst
+test_examples = 50
+eval_chunk_examples = 50
 ```
 
-For Stage 3E, these should aggregate over positive examples and therefore include target-type variation.
+should match the current behavior.
 
-## Smoke Test
+### Step 4: Add Stratified Evaluation Dataset Generation
 
-Run a small smoke test:
+Add a separate helper for stratified evaluation.
+
+Possible name:
+
+```text
+make_stratified_eval_dataset()
+```
+
+This helper should only be used for evaluation.
+
+Do not use stratified generation for training unless a future task explicitly asks for it.
+
+### Step 5: Add Unit Tests
+
+Create or extend tests under:
+
+```text
+infinite_generalization/tests/
+```
+
+Required tests:
+
+1. Chunked random evaluation with one chunk matches unchunked random evaluation for a tiny model and tiny dataset.
+2. Chunked random evaluation consumes exactly `test_examples` examples across multiple chunks.
+3. Stratified Stage 3C evaluation creates balanced positive target-position buckets when possible.
+4. Stratified Stage 3D evaluation creates balanced final query token ids when possible.
+5. Stratified Stage 3E evaluation creates balanced positive target token ids when possible.
+6. Combined Stage 3C+D+E stratified evaluation covers the expected Cartesian product of active positive strata.
+7. Default config still runs with `eval_sampling_mode=random` and `eval_chunk_examples=50`.
+
+Use small lengths such as:
+
+```text
+length = 10
+test_examples = 24
+eval_chunk_examples = 6
+```
+
+The tests should avoid expensive long-length runs.
+
+### Step 6: Smoke Test
+
+Run a smoke test for random chunked evaluation:
 
 ```powershell
-$env:PYTHONPATH = 'src'; ..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --smoke-test --alpha-mode learned_log --target-token-count 3 --non-target-token-count 1 --output-dir runs/stage3e_multiple_targets/smoke
+cd infinite_generalization
+$env:PYTHONPATH = 'src'
+..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --smoke-test --alpha-mode learned_log --test-examples 60 --eval-chunk-examples 10 --eval-sampling-mode random --output-dir runs/stage3_eval_reliability/smoke_random_chunked
 ```
 
-Expected:
+Run a smoke test for stratified chunked evaluation:
 
-- `model.pt` is created
-- `metrics_by_length.csv` is created
-- `target_type_metrics.csv` is created
-- positives contain exactly one target token
-- negatives contain zero target tokens
-- all target token ids appear in positive examples
-- no unexpected NaN appears in key metrics
-- default `target_token_count=1` still works
+```powershell
+cd infinite_generalization
+$env:PYTHONPATH = 'src'
+..\.venv\Scripts\python.exe src\stage3_simplified_attention.py --smoke-test --alpha-mode learned_log --target-position-mode nonfinal_random --target-token-count 3 --non-target-token-count 4 --test-examples 144 --eval-chunk-examples 12 --eval-sampling-mode stratified --output-dir runs/stage3_eval_reliability/smoke_stratified_chunked
+```
 
-## Main Runs
+### Step 7: Rerun Main Comparison Experiments
 
-Use the representative conditions:
+After implementation and tests pass, rerun representative Stage 3C, Stage 3D, and Stage 3E experiments.
+
+Use output root:
 
 ```text
-target_token_count = 3
-non_target_token_count = 1
-target_position_mode = fixed_start
-train_lengths = [10]
+runs/stage3_eval_reliability/
+```
+
+Recommended comparison conditions:
+
+```text
+old-style random:
 test_examples = 50
-eval_batch_size = 8
+eval_chunk_examples = 50
+eval_sampling_mode = random
 ```
-
-Output root:
 
 ```text
-runs/stage3e_multiple_targets/
+larger random:
+test_examples = 500
+eval_chunk_examples = 50
+eval_sampling_mode = random
 ```
-
-Run:
-
-| Run | Alpha mode | Max train steps | Purpose |
-|---|---|---:|---|
-| `constant_e100_t3_nt1` | `constant` | 3200 | check whether constant multiplier still fails |
-| `log_e50_t3_nt1` | `log` | 1600 | check whether fixed log succeeds when every target margin is above 1 |
-| `learned_log_e200_t3_nt1` | `learned_log` | 6400 | check whether learned-log reaches $c\Delta_{\min}>1$ |
-
-## Analysis Questions
-
-### 1. Does The Model Learn A Target Class Detector?
-
-Check whether all target token types have high positive accuracy near training length and at long lengths.
-
-### 2. Is One Target Type Weaker?
-
-Use:
 
 ```text
-target_type_metrics.csv
+larger stratified:
+test_examples = 720
+eval_chunk_examples = 36
+eval_sampling_mode = stratified
 ```
 
-Look for the target token type with the smallest margin:
+The exact `test_examples` value for stratified runs should be divisible by the number of active positive strata when practical.
 
-```math
-\arg\min_h \Delta_h.
+### Step 8: Analyze Differences From Existing Results
+
+Create a concise report or add a section to the relevant Stage 3 report.
+
+The analysis should compare:
+
+```text
+positive accuracy
+positive mean logit
+mean empirical target attention
+mean minimum margin
+worst observed minimum margin
+mean cDelta_min
+worst observed cDelta_min
+target position bucket metrics
+target type metrics
+final query type metrics
 ```
 
-### 3. Does Long-Length Behavior Follow The Smallest Target Margin?
+The main question is not whether every number is identical.
 
-For learned-log, check:
+The main question is:
 
-```math
-c\min_h\Delta_h>1.
-```
-
-If one target type has $c\Delta_h<1$, it may become the first positive subtype to fail at long length.
-
-### 4. Does Fixed Log Still Work?
-
-For fixed log:
-
-```math
-\alpha=\log n.
-```
-
-Expected success condition:
-
-```math
-\Delta_{\min}>1.
-```
-
-### 5. Does Constant Multiplier Still Fail?
-
-Expected:
-
-Constant multiplier may fit training length but should still fail at sufficiently long length because fixed margins do not scale with $\log n$.
+**Do the scientific conclusions change when evaluation is larger and more balanced?**
 
 ## Expected Outcomes
 
-### Outcome A: Target Scores Collapse
-
-All target types receive nearly identical target scores.
-
-Interpretation:
-
-The model learns a shared target-class representation at the attention-score level.
-
-### Outcome B: Target Scores Differ But All Margins Are Large Enough
-
-Target scores differ, but the smallest target margin remains sufficient.
-
-Interpretation:
-
-Exact target-score collapse is not necessary. The relevant diagnostic is the smallest target-vs-non-target margin.
-
-### Outcome C: One Weak Target Type Controls Failure
-
-One target type has a much smaller margin.
-
-Interpretation:
-
-The target class is only as robust as its weakest target type.
-
-## Reporting Plan
-
-Create a dedicated Stage 3E report if results are nontrivial:
+The expected result is:
 
 ```text
-infinite_generalization/documents/STAGE3E_MULTIPLE_TARGET_TOKENS.md
+main success/failure conclusions remain stable
+diagnostic slice estimates become less noisy
+worst-case metrics become more trustworthy
 ```
 
-The report should explain:
+If the results change materially, document which conclusion changed and whether the old conclusion was likely caused by small random evaluation samples.
 
-- why Stage 3E isolates target-side complexity
-- whether the model learns a target class detector
-- whether target token types collapse or remain distinct
-- which target type has the smallest margin
-- whether learned-log reaches $c\Delta_{\min}>1$
-
-## Success Criteria
+## Done Criteria
 
 This task is complete when:
 
-- `--target-token-count` is implemented
-- existing Stage 3 behavior is preserved by default
-- `target_type_metrics.csv` is produced
-- smoke tests pass
-- the three main Stage 3E runs complete
-- target-type results are analyzed
-
-## Expected Conclusion
-
-The likely conclusion is:
-
-**Stage 3E should preserve the same softmax dilution mechanism, but the bottleneck should move from a single target-vs-non-target margin to the target token type with the smallest margin.**
+1. Stage 3 evaluation supports chunked evaluation.
+2. Stage 3 evaluation supports optional stratified evaluation.
+3. The default behavior remains backward compatible.
+4. Unit tests cover chunking and stratification.
+5. Smoke tests pass for random chunked and stratified chunked modes.
+6. Representative Stage 3C/D/E reruns complete under `runs/stage3_eval_reliability/`.
+7. A short analysis explains whether larger and stratified evaluation changed the previous conclusions.
