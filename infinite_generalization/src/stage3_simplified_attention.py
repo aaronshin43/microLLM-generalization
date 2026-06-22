@@ -39,6 +39,8 @@ class Stage3Config:
     train_examples: int = 2_000
     val_examples: int = 500
     test_examples: int = 50
+    eval_chunk_examples: int = 50
+    eval_sampling_mode: str = "random"
     eval_lengths: tuple[int, ...] = (10, 100, 1000, 10000, 100000, 1000000, 5000000, 10000000)
     batch_size: int = 64
     eval_batch_size: int = 16
@@ -104,6 +106,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-examples", type=int, default=Stage3Config.val_examples)
     parser.add_argument("--test-examples", type=int, default=Stage3Config.test_examples)
     parser.add_argument(
+        "--eval-chunk-examples",
+        type=int,
+        default=Stage3Config.eval_chunk_examples,
+        help="Maximum number of evaluation examples generated at once.",
+    )
+    parser.add_argument(
+        "--eval-sampling-mode",
+        choices=("random", "stratified"),
+        default=Stage3Config.eval_sampling_mode,
+        help="Evaluation sampling mode.",
+    )
+    parser.add_argument(
         "--eval-lengths",
         type=int,
         nargs="+",
@@ -157,6 +171,12 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         raise ValueError("--non-target-token-count must be at least 1.")
     if args.non_target_sampling != "uniform":
         raise ValueError(f"Unsupported non-target sampling: {args.non_target_sampling}")
+    if args.test_examples < 1:
+        raise ValueError("--test-examples must be at least 1.")
+    if args.eval_chunk_examples < 1:
+        raise ValueError("--eval-chunk-examples must be at least 1.")
+    if args.eval_sampling_mode not in {"random", "stratified"}:
+        raise ValueError(f"Unsupported eval sampling mode: {args.eval_sampling_mode}")
 
     config = Stage3Config(
         seed=args.seed,
@@ -172,6 +192,8 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         train_examples=args.train_examples,
         val_examples=args.val_examples,
         test_examples=args.test_examples,
+        eval_chunk_examples=args.eval_chunk_examples,
+        eval_sampling_mode=args.eval_sampling_mode,
         eval_lengths=tuple(args.eval_lengths),
         batch_size=args.batch_size,
         eval_batch_size=args.eval_batch_size,
@@ -199,7 +221,9 @@ def build_config(args: argparse.Namespace) -> Stage3Config:
         non_target_sampling=config.non_target_sampling,
         train_examples=64,
         val_examples=32,
-        test_examples=40,
+        test_examples=config.test_examples,
+        eval_chunk_examples=config.eval_chunk_examples,
+        eval_sampling_mode=config.eval_sampling_mode,
         eval_lengths=(10, 20),
         batch_size=16,
         eval_batch_size=20,
@@ -249,26 +273,71 @@ def non_target_token_ids(target_token_count: int, non_target_token_count: int) -
     return list(range(start, start + non_target_token_count))
 
 
-def make_two_token_dataset(
+def position_bucket_values(length: int) -> list[str]:
+    """Return target-position buckets that contain at least one non-final position."""
+
+    buckets: list[str] = []
+    for position in range(length - 1):
+        bucket = target_position_bucket(position, length)
+        if bucket not in buckets:
+            buckets.append(bucket)
+    return buckets
+
+
+def sample_position_from_bucket(
+    *,
+    bucket: str,
+    length: int,
+    generator: torch.Generator,
+) -> int:
+    """Sample one non-final target position from a coarse position bucket."""
+
+    positions = [
+        position
+        for position in range(length - 1)
+        if target_position_bucket(position, length) == bucket
+    ]
+    if not positions:
+        raise ValueError(f"Bucket {bucket!r} has no valid positions for length {length}.")
+    index = torch.randint(
+        low=0,
+        high=len(positions),
+        size=(),
+        generator=generator,
+        dtype=torch.long,
+    ).item()
+    return positions[int(index)]
+
+
+def repeated_balanced_values(values: list[Any], count: int, *, start_index: int = 0) -> list[Any]:
+    """Repeat values in deterministic round-robin order to fill a requested count."""
+
+    if count < 0:
+        raise ValueError("count must be non-negative.")
+    if count and not values:
+        raise ValueError("values must be non-empty when count is positive.")
+    return [values[(start_index + index) % len(values)] for index in range(count)]
+
+
+def make_stage3_dataset_from_counts(
     *,
     length: int,
-    examples: int,
+    positive_count: int,
+    negative_count: int,
     seed: int,
     target_position_mode: str,
     target_token_count: int,
     non_target_token_count: int,
     non_target_sampling: str,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Create a balanced target-presence dataset.
-
-    Positive examples contain exactly one target. Negative examples are all non-target.
-    The token id convention is targets 0..H-1 and non-targets H..H+M-1.
-    """
+    """Create a Stage 3 dataset with explicit positive and negative counts."""
 
     if length < 2:
         raise ValueError("length must be at least 2 for the exactly-one-target setup.")
-    if examples < 2:
-        raise ValueError("examples must be at least 2.")
+    if positive_count < 0 or negative_count < 0:
+        raise ValueError("positive_count and negative_count must be non-negative.")
+    if positive_count + negative_count < 1:
+        raise ValueError("At least one example is required.")
     if target_token_count < 1:
         raise ValueError("target_token_count must be at least 1.")
     if non_target_token_count < 1:
@@ -276,8 +345,6 @@ def make_two_token_dataset(
     if non_target_sampling != "uniform":
         raise ValueError(f"Unsupported non_target_sampling: {non_target_sampling}")
 
-    positive_count = examples // 2
-    negative_count = examples - positive_count
     generator = torch.Generator().manual_seed(seed)
 
     positive_inputs = sample_non_target_tokens(
@@ -308,9 +375,10 @@ def make_two_token_dataset(
     else:
         raise ValueError(f"Unsupported target_position_mode: {target_position_mode}")
 
-    positive_inputs[torch.arange(positive_count), positive_target_positions] = (
-        positive_target_token_ids
-    )
+    if positive_count:
+        positive_inputs[torch.arange(positive_count), positive_target_positions] = (
+            positive_target_token_ids
+        )
     positive_labels = torch.ones(positive_count, dtype=torch.float32)
 
     negative_inputs = sample_non_target_tokens(
@@ -328,13 +396,232 @@ def make_two_token_dataset(
     target_positions = torch.cat([positive_target_positions, negative_target_positions], dim=0)
     target_ids = torch.cat([positive_target_token_ids, negative_target_token_ids], dim=0)
 
-    permutation = torch.randperm(examples, generator=generator)
+    total_examples = positive_count + negative_count
+    permutation = torch.randperm(total_examples, generator=generator)
     return (
         inputs[permutation],
         labels[permutation],
         target_positions[permutation],
         target_ids[permutation],
     )
+
+
+def make_two_token_dataset(
+    *,
+    length: int,
+    examples: int,
+    seed: int,
+    target_position_mode: str,
+    target_token_count: int,
+    non_target_token_count: int,
+    non_target_sampling: str,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Create a balanced target-presence dataset.
+
+    Positive examples contain exactly one target. Negative examples are all non-target.
+    The token id convention is targets 0..H-1 and non-targets H..H+M-1.
+    """
+
+    if examples < 2:
+        raise ValueError("examples must be at least 2.")
+
+    positive_count = examples // 2
+    negative_count = examples - positive_count
+    return make_stage3_dataset_from_counts(
+        length=length,
+        positive_count=positive_count,
+        negative_count=negative_count,
+        seed=seed,
+        target_position_mode=target_position_mode,
+        target_token_count=target_token_count,
+        non_target_token_count=non_target_token_count,
+        non_target_sampling=non_target_sampling,
+    )
+
+
+def make_stratified_eval_dataset(
+    *,
+    length: int,
+    positive_count: int,
+    negative_count: int,
+    seed: int,
+    target_position_mode: str,
+    target_token_count: int,
+    non_target_token_count: int,
+    non_target_sampling: str,
+    positive_stratum_offset: int = 0,
+    negative_final_query_offset: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Create a stratified Stage 3 evaluation dataset.
+
+    Positive strata use the Cartesian product of active diagnostic dimensions:
+    target-position bucket, final query non-target token id, and target token id.
+    Negative examples are balanced over final query token id when that dimension exists.
+    """
+
+    if length < 2:
+        raise ValueError("length must be at least 2 for the exactly-one-target setup.")
+    if positive_count < 0 or negative_count < 0:
+        raise ValueError("positive_count and negative_count must be non-negative.")
+    if positive_count + negative_count < 1:
+        raise ValueError("At least one example is required.")
+    if target_token_count < 1:
+        raise ValueError("target_token_count must be at least 1.")
+    if non_target_token_count < 1:
+        raise ValueError("non_target_token_count must be at least 1.")
+    if non_target_sampling != "uniform":
+        raise ValueError(f"Unsupported non_target_sampling: {non_target_sampling}")
+    if target_position_mode not in {"fixed_start", "nonfinal_random"}:
+        raise ValueError(f"Unsupported target_position_mode: {target_position_mode}")
+
+    generator = torch.Generator().manual_seed(seed)
+    final_query_values = non_target_token_ids(target_token_count, non_target_token_count)
+    target_values = target_token_ids(target_token_count)
+    if target_position_mode == "nonfinal_random":
+        position_values: list[str | None] = position_bucket_values(length)
+    else:
+        position_values = [None]
+
+    positive_strata = [
+        (position_bucket, final_query_id, target_id)
+        for position_bucket in position_values
+        for final_query_id in final_query_values
+        for target_id in target_values
+    ]
+    assigned_positive_strata = repeated_balanced_values(
+        positive_strata,
+        positive_count,
+        start_index=positive_stratum_offset,
+    )
+    assigned_negative_final_ids = repeated_balanced_values(
+        final_query_values,
+        negative_count,
+        start_index=negative_final_query_offset,
+    )
+
+    positive_inputs = sample_non_target_tokens(
+        shape=(positive_count, length),
+        target_token_count=target_token_count,
+        non_target_token_count=non_target_token_count,
+        generator=generator,
+    )
+    positive_target_positions = torch.empty(positive_count, dtype=torch.long)
+    positive_target_token_ids = torch.empty(positive_count, dtype=torch.long)
+    for row_index, (position_bucket, final_query_id, target_id) in enumerate(
+        assigned_positive_strata
+    ):
+        if target_position_mode == "fixed_start":
+            target_position = TARGET_POSITION
+        else:
+            if position_bucket is None:
+                raise RuntimeError("Stratified random target positions require a bucket.")
+            target_position = sample_position_from_bucket(
+                bucket=position_bucket,
+                length=length,
+                generator=generator,
+            )
+        positive_inputs[row_index, -1] = final_query_id
+        positive_inputs[row_index, target_position] = target_id
+        positive_target_positions[row_index] = target_position
+        positive_target_token_ids[row_index] = target_id
+    positive_labels = torch.ones(positive_count, dtype=torch.float32)
+
+    negative_inputs = sample_non_target_tokens(
+        shape=(negative_count, length),
+        target_token_count=target_token_count,
+        non_target_token_count=non_target_token_count,
+        generator=generator,
+    )
+    for row_index, final_query_id in enumerate(assigned_negative_final_ids):
+        negative_inputs[row_index, -1] = final_query_id
+    negative_labels = torch.zeros(negative_count, dtype=torch.float32)
+    negative_target_positions = torch.full((negative_count,), -1, dtype=torch.long)
+    negative_target_token_ids = torch.full((negative_count,), -1, dtype=torch.long)
+
+    inputs = torch.cat([positive_inputs, negative_inputs], dim=0)
+    labels = torch.cat([positive_labels, negative_labels], dim=0)
+    target_positions = torch.cat([positive_target_positions, negative_target_positions], dim=0)
+    target_ids = torch.cat([positive_target_token_ids, negative_target_token_ids], dim=0)
+
+    total_examples = positive_count + negative_count
+    permutation = torch.randperm(total_examples, generator=generator)
+    return (
+        inputs[permutation],
+        labels[permutation],
+        target_positions[permutation],
+        target_ids[permutation],
+    )
+
+
+def chunk_label_counts(total_examples: int, max_chunk_examples: int) -> list[tuple[int, int]]:
+    """Return positive and negative counts for each evaluation chunk."""
+
+    if total_examples < 1:
+        raise ValueError("total_examples must be at least 1.")
+    if max_chunk_examples < 1:
+        raise ValueError("max_chunk_examples must be at least 1.")
+
+    positive_remaining = total_examples // 2
+    negative_remaining = total_examples - positive_remaining
+    label_plan: list[int] = []
+    for index in range(total_examples):
+        if positive_remaining and (index % 2 == 0 or not negative_remaining):
+            label_plan.append(1)
+            positive_remaining -= 1
+        else:
+            label_plan.append(0)
+            negative_remaining -= 1
+
+    chunk_counts: list[tuple[int, int]] = []
+    for start in range(0, total_examples, max_chunk_examples):
+        labels = label_plan[start : start + max_chunk_examples]
+        positive_count = sum(labels)
+        negative_count = len(labels) - positive_count
+        chunk_counts.append((positive_count, negative_count))
+    return chunk_counts
+
+
+def make_eval_dataset(
+    *,
+    length: int,
+    positive_count: int,
+    negative_count: int,
+    seed: int,
+    target_position_mode: str,
+    target_token_count: int,
+    non_target_token_count: int,
+    non_target_sampling: str,
+    eval_sampling_mode: str,
+    positive_stratum_offset: int = 0,
+    negative_final_query_offset: int = 0,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Create one evaluation chunk using the selected sampling mode."""
+
+    if eval_sampling_mode == "random":
+        return make_stage3_dataset_from_counts(
+            length=length,
+            positive_count=positive_count,
+            negative_count=negative_count,
+            seed=seed,
+            target_position_mode=target_position_mode,
+            target_token_count=target_token_count,
+            non_target_token_count=non_target_token_count,
+            non_target_sampling=non_target_sampling,
+        )
+    if eval_sampling_mode == "stratified":
+        return make_stratified_eval_dataset(
+            length=length,
+            positive_count=positive_count,
+            negative_count=negative_count,
+            seed=seed,
+            target_position_mode=target_position_mode,
+            target_token_count=target_token_count,
+            non_target_token_count=non_target_token_count,
+            non_target_sampling=non_target_sampling,
+            positive_stratum_offset=positive_stratum_offset,
+            negative_final_query_offset=negative_final_query_offset,
+        )
+    raise ValueError(f"Unsupported eval_sampling_mode: {eval_sampling_mode}")
 
 
 def sample_target_tokens(
@@ -766,6 +1053,53 @@ def summarize_position_buckets(
     return rows
 
 
+def iter_eval_batches(
+    *,
+    length: int,
+    examples: int,
+    eval_chunk_examples: int,
+    batch_size: int,
+    seed: int,
+    target_position_mode: str,
+    target_token_count: int,
+    non_target_token_count: int,
+    non_target_sampling: str,
+    eval_sampling_mode: str,
+):
+    """Yield evaluation batches while generating only one chunk at a time."""
+
+    positive_seen = 0
+    negative_seen = 0
+    for chunk_index, (positive_count, negative_count) in enumerate(
+        chunk_label_counts(examples, eval_chunk_examples)
+    ):
+        inputs, labels, target_positions, target_ids = make_eval_dataset(
+            length=length,
+            positive_count=positive_count,
+            negative_count=negative_count,
+            seed=seed + chunk_index,
+            target_position_mode=target_position_mode,
+            target_token_count=target_token_count,
+            non_target_token_count=non_target_token_count,
+            non_target_sampling=non_target_sampling,
+            eval_sampling_mode=eval_sampling_mode,
+            positive_stratum_offset=positive_seen,
+            negative_final_query_offset=negative_seen,
+        )
+        loader = make_loader(
+            inputs,
+            labels,
+            target_positions,
+            target_ids,
+            batch_size=batch_size,
+            shuffle=False,
+            seed=seed + 50_000 + chunk_index,
+        )
+        yield from loader
+        positive_seen += positive_count
+        negative_seen += negative_count
+
+
 @torch.no_grad()
 def evaluate_length(
     model: SimplifiedLastQueryAttentionClassifier,
@@ -779,6 +1113,8 @@ def evaluate_length(
     non_target_token_count: int,
     non_target_sampling: str,
     device: torch.device,
+    eval_chunk_examples: int = Stage3Config.eval_chunk_examples,
+    eval_sampling_mode: str = Stage3Config.eval_sampling_mode,
 ) -> tuple[
     dict[str, float | int | str],
     list[dict[str, float | int | str]],
@@ -787,24 +1123,12 @@ def evaluate_length(
 ]:
     """Evaluate one length and collect mechanism metrics."""
 
-    inputs, labels, target_positions, target_ids = make_two_token_dataset(
-        length=length,
-        examples=examples,
-        seed=seed,
-        target_position_mode=target_position_mode,
-        target_token_count=target_token_count,
-        non_target_token_count=non_target_token_count,
-        non_target_sampling=non_target_sampling,
-    )
-    loader = make_loader(
-        inputs,
-        labels,
-        target_positions,
-        target_ids,
-        batch_size=batch_size,
-        shuffle=False,
-        seed=seed,
-    )
+    if examples < 1:
+        raise ValueError("examples must be at least 1.")
+    if eval_chunk_examples < 1:
+        raise ValueError("eval_chunk_examples must be at least 1.")
+    if eval_sampling_mode not in {"random", "stratified"}:
+        raise ValueError(f"Unsupported eval_sampling_mode: {eval_sampling_mode}")
 
     model.eval()
     all_logits: list[torch.Tensor] = []
@@ -849,7 +1173,18 @@ def evaluate_length(
         for target_id in target_token_ids(target_token_count)
     }
 
-    for tokens, batch_labels, batch_target_positions, batch_target_ids in loader:
+    for tokens, batch_labels, batch_target_positions, batch_target_ids in iter_eval_batches(
+        length=length,
+        examples=examples,
+        eval_chunk_examples=eval_chunk_examples,
+        batch_size=batch_size,
+        seed=seed,
+        target_position_mode=target_position_mode,
+        target_token_count=target_token_count,
+        non_target_token_count=non_target_token_count,
+        non_target_sampling=non_target_sampling,
+        eval_sampling_mode=eval_sampling_mode,
+    ):
         tokens = tokens.to(device)
         batch_labels = batch_labels.to(device)
         batch_target_positions = batch_target_positions.to(device)
@@ -1025,6 +1360,11 @@ def evaluate_length(
         "target_token_count": target_token_count,
         "non_target_token_count": non_target_token_count,
         "non_target_sampling": non_target_sampling,
+        "test_examples": examples,
+        "eval_chunk_examples": eval_chunk_examples,
+        "eval_sampling_mode": eval_sampling_mode,
+        "positive_examples": int(labels_cpu.eq(1).sum().item()),
+        "negative_examples": int(labels_cpu.eq(0).sum().item()),
         "alpha_value": alpha_values_cpu.mean().item(),
         "accuracy": metrics["accuracy"],
         "positive_accuracy": metrics["positive_accuracy"],
@@ -1077,6 +1417,19 @@ def evaluate_length(
         deltas=deltas_cpu,
         non_target_stds=non_target_stds_cpu,
     )
+    for position_row in position_rows:
+        position_row.update(
+            {
+                "split": "test",
+                "alpha_mode": model.alpha_mode,
+                "target_token_count": target_token_count,
+                "non_target_token_count": non_target_token_count,
+                "non_target_sampling": non_target_sampling,
+                "test_examples": examples,
+                "eval_chunk_examples": eval_chunk_examples,
+                "eval_sampling_mode": eval_sampling_mode,
+            }
+        )
     non_target_type_rows = []
     for token_id, values in per_type_values.items():
         counts = torch.cat(values["counts"])
@@ -1093,6 +1446,9 @@ def evaluate_length(
                 "target_token_count": target_token_count,
                 "non_target_token_count": non_target_token_count,
                 "non_target_sampling": non_target_sampling,
+                "test_examples": examples,
+                "eval_chunk_examples": eval_chunk_examples,
+                "eval_sampling_mode": eval_sampling_mode,
                 "non_target_token_id": token_id,
                 "mean_non_target_count_in_sequence": counts.to(dtype=torch.float32).mean().item(),
                 "mean_non_target_score": mean_or_nan(scores),
@@ -1117,6 +1473,9 @@ def evaluate_length(
                 "target_token_count": target_token_count,
                 "non_target_token_count": non_target_token_count,
                 "target_position_mode": target_position_mode,
+                "test_examples": examples,
+                "eval_chunk_examples": eval_chunk_examples,
+                "eval_sampling_mode": eval_sampling_mode,
                 "final_query_token_id": final_query_id_value,
                 "target_token_id": target_id_value,
                 "positive_examples": int(correct.numel()),
@@ -1475,6 +1834,8 @@ def main() -> None:
             model,
             length=length,
             examples=config.test_examples,
+            eval_chunk_examples=config.eval_chunk_examples,
+            eval_sampling_mode=config.eval_sampling_mode,
             batch_size=config.eval_batch_size,
             seed=config.seed + 10_000 + length,
             target_position_mode=config.target_position_mode,
