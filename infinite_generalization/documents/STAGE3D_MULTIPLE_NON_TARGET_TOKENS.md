@@ -190,10 +190,14 @@ This report analyzes the Stage 3D main condition:
 ```text
 non_target_token_count = 4
 train_lengths = [10]
-test_examples = 50
+test_examples = 720
+eval_chunk_examples = 36
+eval_sampling_mode = stratified
 eval_batch_size = 8
 eval_lengths = 10, 100, 1000, 10000, 100000, 1000000, 5000000, 10000000
 ```
+
+Each evaluation length is generated in chunks of `eval_chunk_examples` to avoid building the full tensor at 10M, and positive and negative examples are stratified so each final-query non-target id is generated evenly, without random-draw bias.
 
 Token ids:
 
@@ -251,13 +255,13 @@ This table aggregates over sampled last-token types. In other words, examples wi
 
 | Run | Mode | Updates | Positive acc at 10M | Positive logit at 10M | Target attention at 10M | Mean $\Delta_{\min}$ | Worst observed $\Delta_{\min}$ | Mean $c\Delta_{\min}$ | Worst observed $c\Delta_{\min}$ | Type-score std | Generalized attention error |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `constant_e50_nt4` | `constant` | 1600 | 0.0 | -3.202 | 0.001010 | 8.806 | 8.195 | n/a | n/a | 0.255 | $1.59\times10^{-8}$ |
-| `constant_e100_nt4` | `constant` | 3200 | 0.0 | -4.515 | 0.002505 | 9.728 | 9.151 | n/a | n/a | 0.250 | $7.91\times10^{-8}$ |
-| `constant_e1000_nt4` | `constant` | 32000 | 0.0 | -17.223 | 0.053233 | 12.884 | 12.489 | n/a | n/a | 0.226 | $1.20\times10^{-6}$ |
-| `log_e50_nt4` | `log` | 1600 | 1.0 | 3.232 | 1.000000 | 4.351 | 3.983 | n/a | n/a | 0.123 | $0.00$ |
-| `learned_log_e50_nt4` | `learned_log` | 1600 | 1.0 | 3.002 | 0.958747 | 7.810 | 7.234 | 0.675 | 0.625 | 0.238 | $3.79\times10^{-5}$ |
-| `learned_log_e100_nt4` | `learned_log` | 3200 | 1.0 | 4.586 | 0.999770 | 8.293 | 7.758 | 0.968 | 0.905 | 0.231 | $2.19\times10^{-7}$ |
-| `learned_log_e200_nt4` | `learned_log` | 6400 | 1.0 | 6.412 | 0.999999 | 8.637 | 8.132 | 1.303 | 1.227 | 0.225 | $9.06\times10^{-8}$ |
+| `constant_e50_nt4` | `constant` | 1600 | 0.0 | -3.203 | 0.000888 | 8.665 | 8.195 | n/a | n/a | 0.249 | $1.61\times10^{-8}$ |
+| `constant_e100_nt4` | `constant` | 3200 | 0.0 | -4.518 | 0.002218 | 9.594 | 9.151 | n/a | n/a | 0.245 | $5.62\times10^{-8}$ |
+| `constant_e1000_nt4` | `constant` | 32000 | 0.0 | -17.382 | 0.048803 | 12.791 | 12.489 | n/a | n/a | 0.224 | $1.08\times10^{-6}$ |
+| `log_e50_nt4` | `log` | 1600 | 1.0 | 3.232 | 1.000000 | 4.270 | 3.983 | n/a | n/a | 0.119 | $0.00$ |
+| `learned_log_e50_nt4` | `learned_log` | 1600 | 1.0 | 2.868 | 0.938162 | 7.677 | 7.234 | 0.663 | 0.625 | 0.233 | $5.42\times10^{-5}$ |
+| `learned_log_e100_nt4` | `learned_log` | 3200 | 1.0 | 4.584 | 0.999620 | 8.169 | 7.758 | 0.953 | 0.905 | 0.226 | $3.69\times10^{-7}$ |
+| `learned_log_e200_nt4` | `learned_log` | 6400 | 1.0 | 6.412 | 0.999999 | 8.520 | 8.132 | 1.286 | 1.227 | 0.220 | $8.94\times10^{-8}$ |
 
 For each positive example, $\Delta_{\min}$ is the smallest margin among its non-target token types. Worst observed $\Delta_{\min}$ is the smallest of those values across the positive evaluation examples.
 
@@ -284,7 +288,7 @@ p_t(n\mid r)
 At length 10M, the largest mean absolute error between reconstructed target attention and empirical target attention among the main runs is:
 
 ```math
-3.79\times10^{-5}.
+5.42\times10^{-5}.
 ```
 
 This small error indicates that the recorded per-type metrics are consistent with the model's actual attention behavior, so they can be used for the denominator and margin analysis below.
@@ -313,7 +317,7 @@ The fixed log multiplier run succeeds through length 10M.
 
 At length 10M:
 
-- mean $\Delta_{\min}\approx4.351$
+- mean $\Delta_{\min}\approx4.270$
 - target attention is effectively 1.0
 - positive logit remains positive
 - positive accuracy is 1.0
@@ -332,15 +336,15 @@ The learned-log runs show a training-strength pattern similar to the original St
 
 | Run | Length | Positive logit | Target attention | Mean $\Delta_{\min}$ | Mean $c\Delta_{\min}$ |
 |---|---:|---:|---:|---:|---:|
-| `learned_log_e50_nt4` | 10 | 3.264 | 0.999322 | 7.562 | 0.653 |
-| `learned_log_e50_nt4` | 100000 | 3.161 | 0.983331 | 7.579 | 0.655 |
-| `learned_log_e50_nt4` | 10000000 | 3.002 | 0.958747 | 7.810 | 0.675 |
-| `learned_log_e100_nt4` | 10 | 4.586 | 0.999796 | 8.063 | 0.941 |
-| `learned_log_e100_nt4` | 100000 | 4.584 | 0.999641 | 8.079 | 0.943 |
-| `learned_log_e100_nt4` | 10000000 | 4.586 | 0.999770 | 8.293 | 0.968 |
-| `learned_log_e200_nt4` | 10 | 6.411 | 0.999936 | 8.420 | 1.271 |
-| `learned_log_e200_nt4` | 100000 | 6.412 | 0.999995 | 8.435 | 1.273 |
-| `learned_log_e200_nt4` | 10000000 | 6.412 | 0.999999 | 8.637 | 1.303 |
+| `learned_log_e50_nt4` | 10 | 3.265 | 0.999385 | 7.677 | 0.663 |
+| `learned_log_e50_nt4` | 100000 | 3.176 | 0.985629 | 7.677 | 0.663 |
+| `learned_log_e50_nt4` | 10000000 | 2.868 | 0.938162 | 7.677 | 0.663 |
+| `learned_log_e100_nt4` | 10 | 4.586 | 0.999815 | 8.169 | 0.953 |
+| `learned_log_e100_nt4` | 100000 | 4.585 | 0.999693 | 8.169 | 0.953 |
+| `learned_log_e100_nt4` | 10000000 | 4.584 | 0.999620 | 8.169 | 0.953 |
+| `learned_log_e200_nt4` | 10 | 6.411 | 0.999942 | 8.520 | 1.286 |
+| `learned_log_e200_nt4` | 100000 | 6.412 | 0.999995 | 8.520 | 1.286 |
+| `learned_log_e200_nt4` | 10000000 | 6.412 | 0.999999 | 8.520 | 1.286 |
 
 Interpretation:
 
@@ -360,8 +364,8 @@ No.
 
 If the model collapsed all non-target token types into one shared attention score for the sampled final-query conditions, the non-target type-score standard deviation would be near 0. Instead, the 10M type-score standard deviation is consistently nonzero:
 
-- constant runs: about `0.23` to `0.25`
-- learned-log runs: about `0.22` to `0.24`
+- constant runs: about `0.22` to `0.25`
+- learned-log runs: about `0.22` to `0.23`
 - fixed-log run: about `0.12`
 
 This means Stage 3D did break the exact two-score assumption at the attention-score level. The model did not simply recreate:
@@ -384,13 +388,13 @@ Aggregated over sampled last-token types, token id `3` is the dominant non-targe
 
 | Run | Dominant non-target type at 10M | Mean margin | Denominator fraction |
 |---|---:|---:|---:|
-| `constant_e50_nt4` | 3 | 8.806 | 0.366 |
-| `constant_e100_nt4` | 3 | 9.728 | 0.363 |
-| `constant_e1000_nt4` | 3 | 12.884 | 0.351 |
-| `log_e50_nt4` | 3 | 4.351 | 0.888 |
-| `learned_log_e50_nt4` | 3 | 7.810 | 0.526 |
-| `learned_log_e100_nt4` | 3 | 8.293 | 0.574 |
-| `learned_log_e200_nt4` | 3 | 8.637 | 0.625 |
+| `constant_e50_nt4` | 3 | 8.665 | 0.362 |
+| `constant_e100_nt4` | 3 | 9.594 | 0.360 |
+| `constant_e1000_nt4` | 3 | 12.791 | 0.348 |
+| `log_e50_nt4` | 3 | 4.270 | 0.863 |
+| `learned_log_e50_nt4` | 3 | 7.677 | 0.516 |
+| `learned_log_e100_nt4` | 3 | 8.169 | 0.562 |
+| `learned_log_e200_nt4` | 3 | 8.520 | 0.612 |
 
 Token id `3` takes the largest share of the non-target denominator. This is not because it appears much more often since non-target tokens were sampled uniformly. It happens because its score is closest to the target score on average.
 
@@ -419,10 +423,10 @@ For the `learned_log_e200_nt4` run:
 
 | Non-target id | Mean count | Mean score | Mean margin | Denominator fraction |
 |---:|---:|---:|---:|---:|
-| 1 | 2500076.2 | -4.848 | 9.022 | 0.174 |
-| 2 | 2500191.8 | -4.965 | 9.139 | 0.112 |
-| 3 | 2499746.0 | -4.463 | 8.637 | 0.625 |
-| 4 | 2499985.0 | -5.028 | 9.203 | 0.089 |
+| 1 | 2499959.0 | -4.771 | 8.878 | 0.186 |
+| 2 | 2499952.5 | -4.913 | 9.020 | 0.111 |
+| 3 | 2499985.8 | -4.413 | 8.520 | 0.612 |
+| 4 | 2500102.0 | -4.966 | 9.073 | 0.092 |
 
 Even though the non-target token types appear at similar frequencies, the type with the smallest margin contributes most of the non-target denominator. Therefore, the long-length risk is controlled by the non-target type with the smallest margin, not by the average non-target type.
 
@@ -438,15 +442,15 @@ The goal was to check whether the Stage 3D mechanism remains stable as the numbe
 
 | Run | Non-target count | Mode | Positive acc at 10M | Positive logit at 10M | Target attention at 10M | Mean $\Delta_{\min}$ | Worst observed $\Delta_{\min}$ | Mean $c\Delta_{\min}$ | Worst observed $c\Delta_{\min}$ | Type-score std |
 |---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `constant_e100_nt2` | 2 | `constant` | 0.0 | -4.616 | 0.001416 | 9.496 | 9.303 | n/a | n/a | 0.060 |
-| `constant_e100_nt4` | 4 | `constant` | 0.0 | -4.515 | 0.002505 | 9.728 | 9.151 | n/a | n/a | 0.250 |
-| `constant_e100_nt8` | 8 | `constant` | 0.0 | -4.507 | 0.001685 | 9.308 | 8.995 | n/a | n/a | 0.265 |
-| `log_e50_nt2` | 2 | `log` | 1.0 | 3.352 | 1.000000 | 4.168 | 4.034 | n/a | n/a | 0.050 |
-| `log_e50_nt4` | 4 | `log` | 1.0 | 3.232 | 1.000000 | 4.351 | 3.983 | n/a | n/a | 0.123 |
-| `log_e50_nt8` | 8 | `log` | 1.0 | 3.271 | 1.000000 | 4.007 | 3.806 | n/a | n/a | 0.175 |
-| `learned_log_e200_nt2` | 2 | `learned_log` | 1.0 | 6.505 | 0.999992 | 8.596 | 8.420 | 1.191 | 1.167 | 0.054 |
-| `learned_log_e200_nt4` | 4 | `learned_log` | 1.0 | 6.412 | 0.999999 | 8.637 | 8.132 | 1.303 | 1.227 | 0.225 |
-| `learned_log_e200_nt8` | 8 | `learned_log` | 1.0 | 6.422 | 0.999999 | 8.208 | 7.932 | 1.300 | 1.256 | 0.240 |
+| `constant_e100_nt2` | 2 | `constant` | 0.0 | -4.617 | 0.001384 | 9.464 | 9.303 | n/a | n/a | 0.070 |
+| `constant_e100_nt4` | 4 | `constant` | 0.0 | -4.518 | 0.002218 | 9.594 | 9.151 | n/a | n/a | 0.245 |
+| `constant_e100_nt8` | 8 | `constant` | 0.0 | -4.507 | 0.001761 | 9.350 | 8.995 | n/a | n/a | 0.266 |
+| `log_e50_nt2` | 2 | `log` | 1.0 | 3.352 | 1.000000 | 4.146 | 4.034 | n/a | n/a | 0.059 |
+| `log_e50_nt4` | 4 | `log` | 1.0 | 3.232 | 1.000000 | 4.270 | 3.983 | n/a | n/a | 0.119 |
+| `log_e50_nt8` | 8 | `log` | 1.0 | 3.271 | 1.000000 | 4.029 | 3.806 | n/a | n/a | 0.177 |
+| `learned_log_e200_nt2` | 2 | `learned_log` | 1.0 | 6.505 | 0.999992 | 8.567 | 8.420 | 1.187 | 1.167 | 0.064 |
+| `learned_log_e200_nt4` | 4 | `learned_log` | 1.0 | 6.412 | 0.999999 | 8.520 | 8.132 | 1.286 | 1.227 | 0.220 |
+| `learned_log_e200_nt8` | 8 | `learned_log` | 1.0 | 6.422 | 0.999999 | 8.243 | 7.932 | 1.306 | 1.256 | 0.241 |
 
 The qualitative behavior is stable across `non_target_token_count = 2, 4, 8`.
 
@@ -491,9 +495,9 @@ As a result, the effective worst-case quantity $c\Delta_{\min}$ stays above 1. I
 The non-target type-score standard deviation also increases as more non-target token types are added:
 
 ```text
-learned_log_e200_nt2: type-score std = 0.054
-learned_log_e200_nt4: type-score std = 0.225
-learned_log_e200_nt8: type-score std = 0.240
+learned_log_e200_nt2: type-score std = 0.064
+learned_log_e200_nt4: type-score std = 0.220
+learned_log_e200_nt8: type-score std = 0.241
 ```
 
 This means the model does not collapse all non-target token types into one shared attention score. Instead, it learns distinct non-target scores, and the generalized worst-margin analysis remains necessary.
@@ -502,9 +506,9 @@ The denominator-dominant non-target type changes with vocabulary size:
 
 | Run | Dominant non-target token | Margin | Denominator fraction |
 |---|---:|---:|---:|
-| `learned_log_e200_nt2` | 2 | 8.596 | 0.584 |
-| `learned_log_e200_nt4` | 3 | 8.637 | 0.625 |
-| `learned_log_e200_nt8` | 5 | 8.208 | 0.362 |
+| `learned_log_e200_nt2` | 2 | 8.567 | 0.599 |
+| `learned_log_e200_nt4` | 3 | 8.520 | 0.612 |
+| `learned_log_e200_nt8` | 5 | 8.243 | 0.363 |
 
 Within the range `non_target_token_count = 2, 4, 8`, the Stage 3D conclusion remains stable. The model does not rely on exact non-target score collapse. Constant scaling still fails, fixed-log scaling succeeds, and learned-log e200 succeeds with worst observed $c\Delta_{\min}>1$.
 
@@ -523,7 +527,7 @@ The model does not force all non-target token types to share one attention score
 The strongest learned-log run reaches:
 
 ```math
-\mathrm{mean}\ c\Delta_{\min}\approx1.303>1,
+\mathrm{mean}\ c\Delta_{\min}\approx1.286>1,
 \qquad
 \mathrm{worst\ observed}\ c\Delta_{\min}\approx1.227>1,
 ```

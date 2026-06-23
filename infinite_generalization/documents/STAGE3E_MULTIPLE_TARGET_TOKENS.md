@@ -149,9 +149,13 @@ target_token_count = 3
 non_target_token_count = 1
 target_position_mode = fixed_start
 train_lengths = [10]
-test_examples = 50
+test_examples = 720
+eval_chunk_examples = 36
+eval_sampling_mode = stratified
 eval_batch_size = 8
 ```
+
+Each evaluation length is generated in chunks of `eval_chunk_examples` to avoid building the full tensor at 10M, and positive examples are stratified so each target token id is generated evenly, without random-draw bias.
 
 Output root:
 
@@ -169,9 +173,9 @@ runs/stage3e_multiple_targets/
 
 | Run | Positive acc | Negative acc | Positive logit | Target attention | Mean $\Delta_{\min}$ | Worst observed $\Delta_{\min}$ | Mean $c\Delta_{\min}$ | Worst observed $c\Delta_{\min}$ |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `constant_e100_t3_nt1` | 0.0 | 1.0 | -4.583 | 0.001734 | 9.727 | 9.280 | n/a | n/a |
-| `log_e50_t3_nt1` | 1.0 | 1.0 | 3.253 | 1.000000 | 4.317 | 4.033 | n/a | n/a |
-| `learned_log_e200_t3_nt1` | 1.0 | 1.0 | 6.431 | 0.999982 | 8.899 | 8.485 | 1.148 | 1.095 |
+| `constant_e100_t3_nt1` | 0.0 | 1.0 | -4.583 | 0.001678 | 9.690 | 9.280 | n/a | n/a |
+| `log_e50_t3_nt1` | 1.0 | 1.0 | 3.253 | 1.000000 | 4.294 | 4.033 | n/a | n/a |
+| `learned_log_e200_t3_nt1` | 1.0 | 1.0 | 6.431 | 0.999980 | 8.865 | 8.485 | 1.144 | 1.095 |
 
 The qualitative pattern matches earlier Stage 3 results:
 
@@ -185,10 +189,10 @@ The constant multiplier run succeeds near the training length but fails between 
 
 | Length | Positive acc | Positive logit | Target attention |
 |---:|---:|---:|---:|
-| 10 | 1.0 | 4.620 | 0.999426 |
-| 10000 | 1.0 | 1.064 | 0.613926 |
-| 100000 | 0.0 | -3.300 | 0.140843 |
-| 10000000 | 0.0 | -4.583 | 0.001734 |
+| 10 | 1.0 | 4.619 | 0.999418 |
+| 10000 | 1.0 | 1.080 | 0.615645 |
+| 100000 | 0.0 | -3.283 | 0.142676 |
+| 10000000 | 0.0 | -4.583 | 0.001678 |
 
 This is the expected fixed-margin dilution behavior. Even though the learned margins are large at length 10, constant attention scaling does not grow with length, so the non-target denominator eventually dominates.
 

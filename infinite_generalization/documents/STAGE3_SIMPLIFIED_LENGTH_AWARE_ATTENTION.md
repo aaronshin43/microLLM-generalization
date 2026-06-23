@@ -383,6 +383,8 @@ All analyzed runs used:
 - training examples: 2000
 - evaluation lengths up to 10,000,000
 
+Each evaluation length is generated in chunks of `eval_chunk_examples` to avoid building the full tensor at 10M, so the number of evaluation examples can be increased well beyond the original small samples without running out of memory.
+
 The run names encode training strength. For example, `e50` means 50 epochs.
 
 ## Assumption Validation

@@ -153,9 +153,13 @@ All Stage 3C runs used:
 
 - `train_lengths = [10]`
 - `target_position_mode = nonfinal_random`
-- `test_examples = 50`
+- `test_examples = 720`
+- `eval_chunk_examples = 36`
+- `eval_sampling_mode = stratified`
 - `eval_batch_size = 8`
 - evaluation lengths up to 10M
+
+Each evaluation length is generated in chunks of `eval_chunk_examples` to avoid building the full tensor at 10M, and positive examples are stratified so the `beginning`, `middle`, and `end_nonfinal` buckets are generated evenly, without random-draw bias.
 
 Run output root:
 
@@ -223,9 +227,9 @@ At length 10M, the strongest learned-log run behaved identically across target-p
 
 | Bucket | Positive examples | Target position range | Positive accuracy | $\Delta$ | Target attention | Non-target score std |
 |---|---:|---|---:|---:|---:|---:|
-| `beginning` | 10 | 156203-3209198 | 1.0000 | 8.2918 | 0.999968 | 0.0 |
-| `middle` | 7 | 4043097-6469110 | 1.0000 | 8.2918 | 0.999968 | 0.0 |
-| `end_nonfinal` | 8 | 7184538-9811564 | 1.0000 | 8.2918 | 0.999968 | 0.0 |
+| `beginning` | 120 | 1089-3320847 | 1.0000 | 8.2918 | 0.999968 | 0.0 |
+| `middle` | 120 | 3342013-6666059 | 1.0000 | 8.2918 | 0.999968 | 0.0 |
+| `end_nonfinal` | 120 | 6676860-9967342 | 1.0000 | 8.2918 | 0.999968 | 0.0 |
 
 This directly supports the position-independence interpretation.
 
