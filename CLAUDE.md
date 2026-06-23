@@ -32,7 +32,8 @@ Treat `infinite_generalization/documents/` as the source of truth for research i
 ## Commit Guidelines
 
 - Write commit messages in English.
-- Keep commit messages focused on the main change.
+- Keep commit messages short and focused on the main change.
+- Do not write "Co-Authored-By" or some equivalence.
 
 ## Research Context
 
