@@ -20,6 +20,7 @@ from stage3_simplified_attention import (  # noqa: E402
     evaluate_length,
     iter_eval_batches,
     make_stratified_eval_dataset,
+    make_two_token_dataset,
     target_position_bucket,
 )
 
@@ -80,12 +81,61 @@ class Stage3EvalReliabilityTest(unittest.TestCase):
                 continue
             self.assertEqual(row_exact_chunk[key], row_larger_chunk[key])
 
+    def test_single_chunk_random_matches_unchunked_dataset(self) -> None:
+        # The reliable evaluation path with a single chunk must reproduce the
+        # original unchunked random dataset byte-for-byte. This guards against
+        # the refactor silently shifting the examples behind existing Stage 3
+        # conclusions. A non-trivial config exercises random target positions
+        # and multiple target / non-target token types.
+        kwargs = dict(
+            length=37,
+            target_position_mode="nonfinal_random",
+            target_token_count=3,
+            non_target_token_count=4,
+            non_target_sampling="uniform",
+        )
+        base_seed = 4242
+        expected = make_two_token_dataset(examples=50, seed=base_seed, **kwargs)
+
+        batches = list(
+            iter_eval_batches(
+                examples=50,
+                eval_chunk_examples=50,
+                batch_size=16,
+                seed=base_seed,
+                eval_sampling_mode="random",
+                **kwargs,
+            )
+        )
+        actual_inputs = torch.cat([batch[0] for batch in batches])
+        actual_labels = torch.cat([batch[1] for batch in batches])
+        actual_positions = torch.cat([batch[2] for batch in batches])
+        actual_target_ids = torch.cat([batch[3] for batch in batches])
+
+        self.assertTrue(torch.equal(actual_inputs, expected[0]))
+        self.assertTrue(torch.equal(actual_labels, expected[1]))
+        self.assertTrue(torch.equal(actual_positions, expected[2]))
+        self.assertTrue(torch.equal(actual_target_ids, expected[3]))
+
     def test_chunked_random_evaluation_consumes_total_examples(self) -> None:
         row = self.evaluate_tiny_model(examples=24, eval_chunk_examples=6)
 
         self.assertEqual(row["test_examples"], 24)
         self.assertEqual(row["positive_examples"], 12)
         self.assertEqual(row["negative_examples"], 12)
+
+    def test_chunked_random_odd_total_consumes_all_examples(self) -> None:
+        # An odd total that does not divide evenly into chunks must still
+        # consume exactly test_examples, with the balanced split preserved.
+        row = self.evaluate_tiny_model(examples=25, eval_chunk_examples=6)
+
+        self.assertEqual(row["test_examples"], 25)
+        self.assertEqual(row["positive_examples"], 12)
+        self.assertEqual(row["negative_examples"], 13)
+        self.assertEqual(
+            row["positive_examples"] + row["negative_examples"],
+            25,
+        )
 
     def test_stratified_stage3c_balances_target_position_buckets(self) -> None:
         _, labels, target_positions, _ = make_stratified_eval_dataset(
@@ -203,6 +253,33 @@ class Stage3EvalReliabilityTest(unittest.TestCase):
 
         self.assertEqual(len(strata), 36)
         self.assertTrue(all(count == 1 for count in strata.values()))
+
+    def test_chunked_stratified_balances_negative_final_query_ids(self) -> None:
+        # Negative examples carry no target, but worst-case non-target analysis
+        # still needs them balanced over the final query token id. Verify that
+        # balance holds globally across chunk boundaries, not just per chunk.
+        batches = list(
+            iter_eval_batches(
+                length=10,
+                examples=72,
+                eval_chunk_examples=12,
+                batch_size=12,
+                seed=8,
+                target_position_mode="fixed_start",
+                target_token_count=1,
+                non_target_token_count=4,
+                non_target_sampling="uniform",
+                eval_sampling_mode="stratified",
+            )
+        )
+        inputs = torch.cat([batch[0] for batch in batches])
+        labels = torch.cat([batch[1] for batch in batches])
+
+        negative_final_ids = inputs[labels.eq(0), -1]
+        self.assertEqual(
+            Counter(negative_final_ids.tolist()),
+            Counter({1: 9, 2: 9, 3: 9, 4: 9}),
+        )
 
     def test_default_config_uses_random_single_chunk_evaluation(self) -> None:
         config = Stage3Config()
