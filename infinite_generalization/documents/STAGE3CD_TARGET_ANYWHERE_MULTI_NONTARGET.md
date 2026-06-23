@@ -31,14 +31,18 @@ All runs used:
 non_target_token_count = 4
 target_position_mode = nonfinal_random
 train_lengths = [10]
-test_examples = 50
+test_examples = 720
+eval_chunk_examples = 36
+eval_sampling_mode = stratified
 eval_batch_size = 8
 ```
+
+Each evaluation length is generated in chunks of `eval_chunk_examples` to avoid building the full tensor at 10M, and positive examples are stratified over the target-position bucket and final-query non-target id so every combination is generated evenly, without random-draw bias.
 
 Output root:
 
 ```text
-runs/stage3cd_target_anywhere_multi_nontarget/
+runs/stage3cd/
 ```
 
 ## Runs
@@ -55,9 +59,9 @@ These are representative runs rather than a full grid. The goal is to check whet
 
 | Run | Positive acc | Positive logit | Target attention | Mean $\Delta_{\min}$ | Worst observed $\Delta_{\min}$ | Mean $c\Delta_{\min}$ | Worst observed $c\Delta_{\min}$ |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `constant_e100_nt4_target_anywhere` | 0.0 | -4.521 | 0.001845 | 9.628 | 9.329 | n/a | n/a |
-| `log_e50_nt4_target_anywhere` | 1.0 | 3.212 | 1.000000 | 4.216 | 4.048 | n/a | n/a |
-| `learned_log_e200_nt4_target_anywhere` | 1.0 | 6.411 | 0.999998 | 8.510 | 8.256 | 1.292 | 1.253 |
+| `constant_e100_nt4_target_anywhere` | 0.0 | -4.517 | 0.002280 | 9.811 | 9.329 | n/a | n/a |
+| `log_e50_nt4_target_anywhere` | 1.0 | 3.212 | 1.000000 | 4.322 | 4.048 | n/a | n/a |
+| `learned_log_e200_nt4_target_anywhere` | 1.0 | 6.411 | 0.999999 | 8.675 | 8.256 | 1.317 | 1.253 |
 
 The qualitative behavior matches Stage 3D:
 
@@ -71,7 +75,7 @@ The target-anywhere runs are very close to the original fixed-start Stage 3D run
 
 | Condition | Fixed-start positive acc at 10M | Target-anywhere positive acc at 10M | Fixed-start positive logit | Target-anywhere positive logit |
 |---|---:|---:|---:|---:|
-| `constant_e100_nt4` | 0.0 | 0.0 | -4.515 | -4.521 |
+| `constant_e100_nt4` | 0.0 | 0.0 | -4.518 | -4.517 |
 | `log_e50_nt4` | 1.0 | 1.0 | 3.232 | 3.212 |
 | `learned_log_e200_nt4` | 1.0 | 1.0 | 6.412 | 6.411 |
 
@@ -83,15 +87,15 @@ At length 10M, the target-position buckets followed the run-level outcome.
 
 | Run | Bucket | Positive acc | Target attention | Mean delta |
 |---|---|---:|---:|---:|
-| `constant_e100_nt4_target_anywhere` | `beginning` | 0.0 | 0.001942 | 9.883 |
-| `constant_e100_nt4_target_anywhere` | `middle` | 0.0 | 0.001738 | 9.763 |
-| `constant_e100_nt4_target_anywhere` | `end_nonfinal` | 0.0 | 0.001899 | 9.812 |
-| `log_e50_nt4_target_anywhere` | `beginning` | 1.0 | 1.000000 | 4.375 |
-| `log_e50_nt4_target_anywhere` | `middle` | 1.0 | 1.000000 | 4.312 |
-| `log_e50_nt4_target_anywhere` | `end_nonfinal` | 1.0 | 1.000000 | 4.338 |
-| `learned_log_e200_nt4_target_anywhere` | `beginning` | 1.0 | 0.999999 | 8.743 |
-| `learned_log_e200_nt4_target_anywhere` | `middle` | 1.0 | 0.999998 | 8.638 |
-| `learned_log_e200_nt4_target_anywhere` | `end_nonfinal` | 1.0 | 0.999998 | 8.684 |
+| `constant_e100_nt4_target_anywhere` | `beginning` | 0.0 | 0.002280 | 9.985 |
+| `constant_e100_nt4_target_anywhere` | `middle` | 0.0 | 0.002280 | 9.985 |
+| `constant_e100_nt4_target_anywhere` | `end_nonfinal` | 0.0 | 0.002280 | 9.985 |
+| `log_e50_nt4_target_anywhere` | `beginning` | 1.0 | 1.000000 | 4.440 |
+| `log_e50_nt4_target_anywhere` | `middle` | 1.0 | 1.000000 | 4.440 |
+| `log_e50_nt4_target_anywhere` | `end_nonfinal` | 1.0 | 1.000000 | 4.440 |
+| `learned_log_e200_nt4_target_anywhere` | `beginning` | 1.0 | 0.999999 | 8.837 |
+| `learned_log_e200_nt4_target_anywhere` | `middle` | 1.0 | 0.999999 | 8.837 |
+| `learned_log_e200_nt4_target_anywhere` | `end_nonfinal` | 1.0 | 0.999999 | 8.837 |
 
 There is no evidence that one target-position bucket fails earlier. The constant run fails across all buckets, while the fixed-log and learned-log e200 runs succeed across all buckets.
 
@@ -103,9 +107,9 @@ At length 10M:
 
 | Run | Dominant non-target type | Mean margin | Denominator fraction |
 |---|---:|---:|---:|
-| `constant_e100_nt4_target_anywhere` | 2 | 9.638 | 0.291 |
-| `log_e50_nt4_target_anywhere` | 2 | 4.232 | 0.525 |
-| `learned_log_e200_nt4_target_anywhere` | 2 | 8.523 | 0.364 |
+| `constant_e100_nt4_target_anywhere` | 2 | 9.822 | 0.288 |
+| `log_e50_nt4_target_anywhere` | 2 | 4.340 | 0.482 |
+| `learned_log_e200_nt4_target_anywhere` | 2 | 8.689 | 0.352 |
 
 This does not change the main interpretation. The identity of the denominator-dominant non-target type can vary by run, seed, or final-query composition. The important diagnostic is still the worst-case margin and denominator contribution, not the specific token id.
 

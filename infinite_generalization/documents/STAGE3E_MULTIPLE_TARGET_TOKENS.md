@@ -160,7 +160,7 @@ Each evaluation length is generated in chunks of `eval_chunk_examples` to avoid 
 Output root:
 
 ```text
-runs/stage3e_multiple_targets/
+runs/stage3e/
 ```
 
 | Run | Multiplier mode | Max train steps |

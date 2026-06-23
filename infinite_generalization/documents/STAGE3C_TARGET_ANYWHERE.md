@@ -164,7 +164,7 @@ Each evaluation length is generated in chunks of `eval_chunk_examples` to avoid 
 Run output root:
 
 ```text
-runs/stage3c_target_anywhere/
+runs/stage3c/
 ```
 
 The seven Stage 3 conditions were rerun:
@@ -185,12 +185,12 @@ The 10M-length results were nearly identical to the original fixed-start Stage 3
 
 | Run | Mode | Updates | $c$ | $\Delta$ | $c\Delta$ | Positive logit at 10M | Positive accuracy at 10M | Non-target score std |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| `constant_e50` | `constant` | 1600 | n/a | 8.0941 | n/a | -3.6417 | 0.0000 | 0.0 |
-| `constant_e100` | `constant` | 3200 | n/a | 8.9856 | n/a | -4.9126 | 0.0000 | 0.0 |
-| `constant_e1000` | `constant` | 32000 | n/a | 12.2747 | n/a | -18.6486 | 0.0000 | 0.0 |
+| `constant_e50` | `constant` | 1600 | n/a | 8.0941 | n/a | -3.6341 | 0.0000 | 0.0 |
+| `constant_e100` | `constant` | 3200 | n/a | 8.9856 | n/a | -4.9006 | 0.0000 | 0.0 |
+| `constant_e1000` | `constant` | 32000 | n/a | 12.2746 | n/a | -18.5912 | 0.0000 | 0.0 |
 | `log_e50` | `log` | 1600 | n/a | 3.9333 | n/a | 3.7183 | 1.0000 | 0.0 |
-| `learned_log_e50` | `learned_log` | 1600 | 0.0662 | 7.4015 | 0.4902 | -1.3553 | 0.0000 | 0.0 |
-| `learned_log_e100` | `learned_log` | 3200 | 0.0966 | 7.9243 | 0.7659 | 4.8679 | 1.0000 | 0.0 |
+| `learned_log_e50` | `learned_log` | 1600 | 0.0662 | 7.4015 | 0.4902 | -1.3632 | 0.0000 | 0.0 |
+| `learned_log_e100` | `learned_log` | 3200 | 0.0966 | 7.9243 | 0.7659 | 4.8677 | 1.0000 | 0.0 |
 | `learned_log_e200` | `learned_log` | 6400 | 0.1361 | 8.2918 | 1.1284 | 6.8163 | 1.0000 | 0.0 |
 
 Interpretation:
@@ -210,12 +210,12 @@ Across all evaluation lengths, the bucket-level variation was essentially zero u
 | Run | Max delta bucket range | Max target-attention bucket range | Min positive accuracy across buckets | Max non-target score std | Final target count |
 |---|---:|---:|---:|---:|---:|
 | `constant_e50` | $9.5\times10^{-7}$ | $4.8\times10^{-7}$ | 0.0000 | 0.0 | 0 |
-| `constant_e100` | $9.5\times10^{-7}$ | $3.6\times10^{-7}$ | 0.0000 | 0.0 | 0 |
+| `constant_e100` | $0.0$ | $4.2\times10^{-7}$ | 0.0000 | 0.0 | 0 |
 | `constant_e1000` | $1.9\times10^{-6}$ | $6.0\times10^{-7}$ | 0.0000 | 0.0 | 0 |
-| `log_e50` | $7.2\times10^{-7}$ | $1.8\times10^{-7}$ | 1.0000 | 0.0 | 0 |
-| `learned_log_e50` | $9.5\times10^{-7}$ | $2.1\times10^{-5}$ | 0.0000 | 0.0 | 0 |
-| `learned_log_e100` | $9.5\times10^{-7}$ | $1.1\times10^{-5}$ | 1.0000 | 0.0 | 0 |
-| `learned_log_e200` | $9.5\times10^{-7}$ | $1.8\times10^{-7}$ | 1.0000 | 0.0 | 0 |
+| `log_e50` | $0.0$ | $0.0$ | 1.0000 | 0.0 | 0 |
+| `learned_log_e50` | $0.0$ | $1.9\times10^{-5}$ | 0.0000 | 0.0 | 0 |
+| `learned_log_e100` | $9.5\times10^{-7}$ | $1.0\times10^{-5}$ | 1.0000 | 0.0 | 0 |
+| `learned_log_e200` | $0.0$ | $4.2\times10^{-7}$ | 1.0000 | 0.0 | 0 |
 
 Interpretation:
 
@@ -251,7 +251,7 @@ The maximum bucket-level delta range across all runs and lengths was about $1.9\
 
 Yes.
 
-Target attention was stable across beginning, middle, and end-nonfinal buckets. The largest bucket-level attention range was about $2.1\times10^{-5}$, from the undertrained learned-log e50 run. The successful runs were even more stable.
+Target attention was stable across beginning, middle, and end-nonfinal buckets. The largest bucket-level attention range was about $1.9\times10^{-5}$, from the undertrained learned-log e50 run. The successful runs were even more stable, with several buckets matching exactly under the balanced stratified evaluation.
 
 ### 4. Does Learned-Log e200 Still Reach The Asymptotic Regime?
 

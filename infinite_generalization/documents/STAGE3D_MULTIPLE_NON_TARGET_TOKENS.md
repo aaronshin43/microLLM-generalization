@@ -246,7 +246,7 @@ where $p_t$ is the attention mass on the target token.
 Run output root:
 
 ```text
-runs/stage3d_multiple_non_targets/
+runs/stage3d/
 ```
 
 ## Overall Results At Length 10M

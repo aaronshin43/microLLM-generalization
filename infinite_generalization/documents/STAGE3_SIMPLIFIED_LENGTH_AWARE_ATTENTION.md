@@ -366,13 +366,13 @@ The softplus function keeps $c$ positive while allowing optimization over an unc
 Analyzed run directories:
 
 ```text
-runs/stage3_simplified_attention_constant_e50
-runs/stage3_simplified_attention_constant_e100
-runs/stage3_simplified_attention_constant_e1000
-runs/stage3_simplified_attention_log_e50
-runs/stage3_simplified_attention_learned_log_e50
-runs/stage3_simplified_attention_learned_log_e100
-runs/stage3_simplified_attention_learned_log_e200
+runs/stage3base/constant_e50
+runs/stage3base/constant_e100
+runs/stage3base/constant_e1000
+runs/stage3base/log_e50
+runs/stage3base/learned_log_e50
+runs/stage3base/learned_log_e100
+runs/stage3base/learned_log_e200
 ```
 
 All analyzed runs used:
