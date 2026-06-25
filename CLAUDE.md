@@ -21,6 +21,15 @@ Treat `infinite_generalization/documents/` as the source of truth for research i
 - Match the syntax to the shell you actually invoke; do not mix PowerShell-only syntax into Bash commands or vice versa.
 - Every code comment must be written in English.
 
+## Document Math Formatting
+
+These rules apply when writing or editing Markdown documents (for example under `infinite_generalization/documents/`).
+
+- Wrap inline math in `$...$`, never in backticks; backticks do not render as math. Examples: `$c\Delta > 1$`, `$\Delta_{\min}$`, `$\alpha$`, `$o(n)$`, `$m_{\text{non}}$`.
+- Keep backticks only for non-math code spans: file names, config keys, run names, code identifiers, and library expressions (for example `eval_chunk_examples`, `learned_log_e200_t3_nt1`, `Linear(H+1, H+1)`).
+- Leave bare measured or data values as plain text or backticks, not math (for example `1.000`, `0.860`).
+- Use fenced code blocks tagged `math` for display equations, and fenced code blocks tagged `text` for token-sequence layouts and config listings; do not convert these blocks to `$...$`.
+
 ## Activity Log
 
 - Add an activity log entry only when the user explicitly asks.
