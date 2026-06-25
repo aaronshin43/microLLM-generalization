@@ -51,6 +51,7 @@ The project studies length generalization in very small models on existential ta
 - Stage 1: a minimal transformer trained at short length does not learn a true length-invariant solution. Numerical analysis attributes failure to fixed-margin attention dilution plus length-growing non-target/max-pool effects.
 - Stage 2B: tested length-aware transformer interventions. Some helped finite extrapolation, but the full-transformer setting stayed harder than the simplified theory.
 - Stage 3: moved to a professor-suggested reduced attention model where the final query attends over token embeddings, to test the theory directly in a simpler architecture.
+- Stage 4A: extended the reduced model from a binary present/absent detector to a non-binary identity classifier that names which target token type is present, or a dedicated none class.
 
 Stage 3 findings so far:
 - Constant multiplier fails at long length because target attention dilutes.
@@ -62,6 +63,11 @@ Stage 3 findings so far:
 - Stage 3C+D sanity check matched Stage 3D; target-anywhere placement did not change the main conclusion.
 - Stage 3E implemented multiple target token types and completed base experiments.
 
+Stage 4A findings so far:
+- The Stage 3 length-generalization story transfers to non-binary classification: constant fails, fixed-log succeeds, and learned-log succeeds once worst-case `c * Delta` exceeds 1.
+- The multi-class failure mode is presence collapse (positives misclassified as the none class), not type confusion; the smallest-margin target type fails first.
+- Learned-log at 6400 steps passed the 10M benchmark with worst-case `c * Delta = 0.86 < 1` (asymptotically incomplete); 9600 steps pushed it to `c * Delta = 1.02 > 1`.
+
 ## Key Documents
 
 - `infinite_generalization/documents/TASK.md`
@@ -71,18 +77,21 @@ Stage 3 findings so far:
 - `infinite_generalization/documents/STAGE3CD_TARGET_ANYWHERE_MULTI_NONTARGET.md`
 - `infinite_generalization/documents/STAGE3D_MULTIPLE_NON_TARGET_TOKENS.md`
 - `infinite_generalization/documents/STAGE3E_MULTIPLE_TARGET_TOKENS.md`
+- `infinite_generalization/documents/STAGE4A_NONBINARY_CLASSIFICATION.md`
 
 ## Important Code Files
 
 - Main Stage 3 experiment code: `infinite_generalization/src/stage3_simplified_attention.py`
+- Stage 4A non-binary classification code: `infinite_generalization/src/stage4a_nonbinary_classification.py`
 - Mechanistic analysis: `infinite_generalization/src/analyze_stage3_mechanism.py`
 - Tests: `infinite_generalization/tests/`
 
 The Stage 3E implementation supports multiple target token types via `target_token_count`, multiple non-target token types via `non_target_token_count`, target-anywhere mode via `target_position_mode`, and target-type diagnostics in `target_type_metrics.csv`.
 
+The Stage 4A implementation reuses the Stage 3 dataset, chunked and stratified evaluation, and length-aware `alpha` modes, adding a multi-class value pathway (per-target-type attention mass), a head over `H + 1` classes (`H` target types plus a none class), and multi-class diagnostics. Its tests live in `infinite_generalization/tests/test_stage4a_nonbinary.py`.
+
 Recent run locations:
-- Stage 3C+D sanity check: `infinite_generalization/runs/stage3cd_target_anywhere_multi_nontarget/`
-- Stage 3E base runs: `infinite_generalization/runs/stage3e_multiple_targets/`
+- Stage 4A base runs: `infinite_generalization/runs/stage4a/`
 
 ## Cautions
 
