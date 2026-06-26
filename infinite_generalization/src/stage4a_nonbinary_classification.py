@@ -14,9 +14,10 @@ value pathway, head, loss, and metrics.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import random
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -193,7 +194,7 @@ def parse_args() -> argparse.Namespace:
         "--eval-lengths",
         type=int,
         nargs="+",
-        default=list(Stage4AConfig.eval_lengths),
+        default=None,
     )
     parser.add_argument("--batch-size", type=int, default=Stage4AConfig.batch_size)
     parser.add_argument("--eval-batch-size", type=int, default=Stage4AConfig.eval_batch_size)
@@ -206,6 +207,23 @@ def parse_args() -> argparse.Namespace:
         "--alpha-log-scale-init",
         type=float,
         default=Stage4AConfig.alpha_log_scale_init,
+    )
+    parser.add_argument(
+        "--eval-only",
+        action="store_true",
+        help="Load a saved model checkpoint and run evaluation without training.",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Path to model.pt for --eval-only.",
+    )
+    parser.add_argument(
+        "--config-json",
+        type=str,
+        default=None,
+        help="Path to config.json for --eval-only. Defaults to config.json next to checkpoint.",
     )
     parser.add_argument("--smoke-test", action="store_true")
     return parser.parse_args()
@@ -257,7 +275,11 @@ def build_config(args: argparse.Namespace) -> Stage4AConfig:
         return Stage4AConfig(
             train_examples=args.train_examples,
             val_examples=args.val_examples,
-            eval_lengths=tuple(args.eval_lengths),
+            eval_lengths=(
+                tuple(args.eval_lengths)
+                if args.eval_lengths is not None
+                else Stage4AConfig.eval_lengths
+            ),
             batch_size=args.batch_size,
             eval_batch_size=args.eval_batch_size,
             epochs=args.epochs,
@@ -273,6 +295,117 @@ def build_config(args: argparse.Namespace) -> Stage4AConfig:
         epochs=2,
         **common,
     )
+
+
+def resolve_input_path(path_value: str) -> Path:
+    """Resolve a user path from either cwd or the project directory."""
+
+    path = Path(path_value)
+    if path.is_absolute():
+        return path
+    cwd_candidate = Path.cwd() / path
+    if cwd_candidate.exists():
+        return cwd_candidate
+    return project_dir() / path
+
+
+def resolve_output_path(path_value: str) -> Path:
+    """Resolve an output path using the project directory for relative paths."""
+
+    path = Path(path_value)
+    return path if path.is_absolute() else project_dir() / path
+
+
+def load_config_json(path: Path) -> Stage4AConfig:
+    """Load a saved Stage 4A config, ignoring derived metadata fields."""
+
+    with path.open("r", encoding="utf-8") as config_file:
+        raw_config = json.load(config_file)
+
+    config_fields = {field.name for field in fields(Stage4AConfig)}
+    kwargs = {key: value for key, value in raw_config.items() if key in config_fields}
+    if "train_lengths" in kwargs:
+        kwargs["train_lengths"] = tuple(kwargs["train_lengths"])
+    if "eval_lengths" in kwargs:
+        kwargs["eval_lengths"] = tuple(kwargs["eval_lengths"])
+    return Stage4AConfig(**kwargs)
+
+
+def load_model_checkpoint(
+    checkpoint_path: Path,
+    *,
+    config: Stage4AConfig,
+    device: torch.device,
+) -> tuple[SimplifiedLastQueryAttentionMultiClass, int]:
+    """Load a trained Stage 4A model checkpoint."""
+
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model_kwargs = {
+        "d_head": int(checkpoint.get("d_head", config.d_head)),
+        "alpha_mode": checkpoint.get("alpha_mode", config.alpha_mode),
+        "alpha_log_scale_init": float(
+            checkpoint.get("alpha_log_scale_init", config.alpha_log_scale_init)
+        ),
+        "target_token_count": int(
+            checkpoint.get("target_token_count", config.target_token_count)
+        ),
+        "non_target_token_count": int(
+            checkpoint.get("non_target_token_count", config.non_target_token_count)
+        ),
+    }
+    expected = {
+        "d_head": config.d_head,
+        "alpha_mode": config.alpha_mode,
+        "target_token_count": config.target_token_count,
+        "non_target_token_count": config.non_target_token_count,
+    }
+    for key, expected_value in expected.items():
+        if model_kwargs[key] != expected_value:
+            raise ValueError(
+                f"Checkpoint {key}={model_kwargs[key]!r} does not match "
+                f"config {key}={expected_value!r}."
+            )
+
+    model = SimplifiedLastQueryAttentionMultiClass(**model_kwargs).to(device)
+    model.load_state_dict(checkpoint["state_dict"])
+    optimizer_updates = int(checkpoint.get("optimizer_updates", 0))
+    return model, optimizer_updates
+
+
+def run_evaluation(
+    model: SimplifiedLastQueryAttentionMultiClass,
+    config: Stage4AConfig,
+    *,
+    device: torch.device,
+    output_dir: Path,
+    optimizer_updates: int,
+) -> None:
+    """Run configured evaluation lengths and write Stage 4A metric CSVs."""
+
+    rows: list[dict[str, Any]] = []
+    target_type_rows: list[dict[str, Any]] = []
+    for length in config.eval_lengths:
+        row, type_rows = evaluate_length(
+            model,
+            length=length,
+            examples=config.test_examples,
+            eval_chunk_examples=config.eval_chunk_examples,
+            eval_sampling_mode=config.eval_sampling_mode,
+            batch_size=config.eval_batch_size,
+            seed=config.seed + 10_000 + length,
+            target_position_mode=config.target_position_mode,
+            target_token_count=config.target_token_count,
+            non_target_token_count=config.non_target_token_count,
+            non_target_sampling=config.non_target_sampling,
+            device=device,
+        )
+        row["optimizer_updates"] = optimizer_updates
+        rows.append(row)
+        target_type_rows.extend(type_rows)
+
+    write_csv(output_dir / "metrics_by_length.csv", rows)
+    if target_type_rows:
+        write_csv(output_dir / "target_type_metrics.csv", target_type_rows)
 
 
 def run_loaders_once(
@@ -617,10 +750,50 @@ def main() -> None:
     """Run the Stage 4A non-binary classification experiment."""
 
     args = parse_args()
+
+    if args.eval_only:
+        if args.checkpoint is None:
+            raise ValueError("--eval-only requires --checkpoint.")
+        checkpoint_path = resolve_input_path(args.checkpoint)
+        config_path = (
+            resolve_input_path(args.config_json)
+            if args.config_json is not None
+            else checkpoint_path.parent / "config.json"
+        )
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config JSON not found: {config_path}")
+
+        config = load_config_json(config_path)
+        if args.eval_lengths is not None:
+            config = replace(config, eval_lengths=tuple(args.eval_lengths))
+        set_reproducibility(config.seed)
+        device = resolve_device(args.device)
+        if args.output_dir == Stage4AConfig.output_dir:
+            output_dir = resolve_output_path(config.output_dir)
+        else:
+            output_dir = resolve_output_path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        model, optimizer_updates = load_model_checkpoint(
+            checkpoint_path,
+            config=config,
+            device=device,
+        )
+        run_evaluation(
+            model,
+            config,
+            device=device,
+            output_dir=output_dir,
+            optimizer_updates=optimizer_updates,
+        )
+        print(f"Wrote evaluation outputs to: {output_dir}")
+        return
+
     config = build_config(args)
     set_reproducibility(config.seed)
     device = resolve_device(config.device)
-    output_dir = project_dir() / config.output_dir
+    output_dir = resolve_output_path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     train_lengths = resolved_train_lengths(config)
 
@@ -655,30 +828,13 @@ def main() -> None:
         },
     )
 
-    rows: list[dict[str, Any]] = []
-    target_type_rows: list[dict[str, Any]] = []
-    for length in config.eval_lengths:
-        row, type_rows = evaluate_length(
-            model,
-            length=length,
-            examples=config.test_examples,
-            eval_chunk_examples=config.eval_chunk_examples,
-            eval_sampling_mode=config.eval_sampling_mode,
-            batch_size=config.eval_batch_size,
-            seed=config.seed + 10_000 + length,
-            target_position_mode=config.target_position_mode,
-            target_token_count=config.target_token_count,
-            non_target_token_count=config.non_target_token_count,
-            non_target_sampling=config.non_target_sampling,
-            device=device,
-        )
-        row["optimizer_updates"] = optimizer_updates
-        rows.append(row)
-        target_type_rows.extend(type_rows)
-
-    write_csv(output_dir / "metrics_by_length.csv", rows)
-    if target_type_rows:
-        write_csv(output_dir / "target_type_metrics.csv", target_type_rows)
+    run_evaluation(
+        model,
+        config,
+        device=device,
+        output_dir=output_dir,
+        optimizer_updates=optimizer_updates,
+    )
 
     print(f"Wrote outputs to: {output_dir}")
 
