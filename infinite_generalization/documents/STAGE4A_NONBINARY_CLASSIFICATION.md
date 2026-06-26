@@ -68,7 +68,7 @@ It helps to line this up directly against the "Stage 3 Implementation" section o
 A_j = \frac{e^{\alpha s_j}}{\sum_k e^{\alpha s_k}}
 ```
 
-are unchanged, so the dilution formula $p_t(n) = 1 / (1 + (n-1)e^{-\alpha\Delta})$ still governs how much attention mass lands on the target position. Stage 4A only changes the **value half**: the shape of the attention output $o(n)$ and the head that reads it.
+are unchanged, so the dilution formula $m_h(n) = e^{\alpha\Delta_h}/(e^{\alpha\Delta_h} + (n-1))$ still governs how much attention mass lands on the target position. Stage 4A only changes the **value half**: the shape of the attention output $o(n)$ and the head that reads it.
 
 **Change 1 — the attention output gains one slot per target type.**
 
@@ -148,6 +148,20 @@ and the attention mass on the single target position is the familiar dilution ex
 m_h(n) = \frac{e^{\alpha\Delta_h}}{e^{\alpha\Delta_h} + (n-1)}.
 ```
 
+The corresponding non-target slot for this controlled single-non-target setup is
+
+```math
+m_{\text{non}}(n)
+= 1 - m_h(n)
+= \frac{n-1}{e^{\alpha\Delta_h} + (n-1)}.
+```
+
+Equivalently, the non-target-to-target ratio is
+
+```math
+\frac{m_{\text{non}}(n)}{m_h(n)} = (n-1)e^{-\alpha\Delta_h}.
+```
+
 Stage 4A inherits this mechanism unchanged. The **presence axis** introduced in the previous section is exactly this dilution term, now written per target type as $m_h(n)$. The **identity axis** sits on top of it: in the controlled setup each positive contains exactly one target type, so the correct $m_h$ is the only non-zero target slot as long as the target position keeps any non-trivial mass.
 
 The key prediction follows directly:
@@ -194,7 +208,7 @@ All four runs reach train and validation accuracy `1.000` at the training length
 | `constant_e100_t3_nt1` | 3200 | 1.000 | 1.000 | 0.0065 |
 | `log_e50_t3_nt1` | 1600 | 1.000 | 1.000 | 0.0287 |
 | `learned_log_e200_t3_nt1` | 6400 | 1.000 | 1.000 | 0.0010 |
-| `learned_log_e300_t3_nt1` | 9600 | 1.000 | 1.000 | — |
+| `learned_log_e300_t3_nt1` | 9600 | 1.000 | 1.000 | 0.0002 |
 
 ## Base Results At Length 10M
 
@@ -223,7 +237,15 @@ The constant run is perfect up to length 1000 and then dilutes:
 | 100000 | 0.500 | 0.000 | 1.000 | 0.0813 |
 | 10000000 | 0.500 | 0.000 | 1.000 | 0.0009 |
 
-With $\alpha = 1$ fixed, the non-target mass $(n-1)\,e^{-\Delta}$ grows linearly in $n$, so target attention follows $1 / (1 + (n-1)e^{-\Delta})$ and collapses. Accuracy floors at `0.500`: negatives are still classified as $n$ perfectly (none-class acc stays `1.000`), but every positive collapses to $n$, so exactly half the balanced test set is wrong.
+With $\alpha = 1$ fixed, target attention and non-target mass are
+
+```math
+m_h(n) = \frac{e^{\Delta_h}}{e^{\Delta_h} + (n-1)},
+\qquad
+m_{\text{non}}(n) = 1 - m_h(n).
+```
+
+As $n$ grows, $m_{\text{non}}(n) \to 1$ and $m_h(n) \to 0$, so the target slot collapses. Accuracy floors at `0.500`: negatives are still classified as $n$ perfectly (none-class acc stays `1.000`), but every positive collapses to $n$, so exactly half the balanced test set is wrong.
 
 ## Graceful Failure: Presence Collapse, Not Type Confusion
 
@@ -247,40 +269,49 @@ At length 10000 only $t_0$ — the largest-margin type — still survives, which
 
 ## Fixed-Log Behavior
 
-The fixed-log run succeeds at every evaluated length. Because $\alpha = \log n$, the non-target mass behaves like $n^{1 - \Delta}$ with $\Delta_{\text{worst}} \approx 4.11 \gg 1$, so it vanishes as roughly $n^{-3.1}$. Target attention stays `1.000` and accuracy stays `1.000` through 10M. This is the only mode whose success is guaranteed by a comfortable margin over the threshold.
+The fixed-log run succeeds at every evaluated length. Because $\alpha = \log n$,
+
+```math
+m_h(n) = \frac{n^{\Delta_h}}{n^{\Delta_h} + (n-1)},
+\qquad
+m_{\text{non}}(n) = 1 - m_h(n).
+```
+
+With $\Delta_{\text{worst}} \approx 4.11 \gg 1$, the non-target mass vanishes as roughly $n^{1-\Delta_{\text{worst}}} \approx n^{-3.1}$. Target attention stays `1.000` and accuracy stays `1.000` through 10M. This is the only mode whose success is guaranteed by a comfortable margin over the threshold.
 
 ## Learned-Log Behavior And The $c\Delta$ Crossing
 
-The learned-log result is the most interesting, because Stage 4A reproduces the Stage 3 subtlety that "passing at 10M" and "being asymptotically length-invariant" are **not** the same thing.
+The learned-log result is best understood through the threshold $c\Delta_{\min} > 1$.
 
-**e200 (6400 steps).** Accuracy is `1.000` at every length, but the diagnostic is below threshold:
+**e200 (6400 steps).** This run is accurate at every evaluated length, including 10M, but it does **not** reach the asymptotic success condition:
 
 ```math
 c = 0.1036,\quad \Delta_{\min} = 8.301,\quad c\,\Delta_{\min} = 0.860 < 1.
 ```
 
-The signature of $c\Delta < 1$ is visible directly in the data: target attention is **slowly decreasing** with length, `0.9998 → 0.9982` from length 10 to 10M. The effective non-target mass scales as
+Because $c\Delta_{\min} < 1$, target attention is still slowly decreasing with length (`0.9998 -> 0.9982` from length 10 to 10M). The useful diagnostic is the non-target-to-target ratio:
 
 ```math
-m_{\text{non}}(n) \;\approx\; e^{-\Delta_{\min}}\, n^{\,1 - c\Delta_{\min}} \;=\; e^{-8.301}\, n^{0.140},
+r_{\text{non}/h}(n) \approx e^{-\Delta_{\min}} n^{1-c\Delta_{\min}}
+= e^{-8.301} n^{0.140}.
 ```
 
-which *grows*, but from a tiny prefactor $e^{-8.301} \approx 2.5\times10^{-4}$. The crossover where this mass reaches $O(1)$ is around length $10^{25}$ — astronomically beyond the tested $10^7$ range. So e200 passes the benchmark **for the wrong reason**: a large raw margin pushes the eventual collapse out of range, rather than the multiplier actually keeping the mass bounded.
+The exponent is positive, so the ratio eventually grows. The prefactor is tiny, so the expected failure point is pushed far beyond the benchmark, around length $10^{25}$. Thus e200 passes the 10M evaluation, but it should still fail asymptotically.
 
-**e300 (9600 steps).** Increasing the training budget pushes the diagnostic over the threshold:
+**e300 (9600 steps).** The rerun increases both the learned coefficient and the worst raw margin enough to cross the threshold:
 
 ```math
 c = 0.1195,\quad \Delta_{\min} = 8.518,\quad c\,\Delta_{\min} = 1.018 > 1.
 ```
 
-Both factors increase: the learned coefficient $c$ rises from `0.104` to `0.120`, and the worst raw margin $\Delta_{\min}$ rises from `8.30` to `8.52`, so their product crosses 1. The qualitative behavior changes accordingly — target attention at 10M is now flat at `0.9999` instead of drifting down, i.e. the model has entered the genuine length-invariant regime where $m_{\text{non}} \propto n^{-0.018} \to 0$.
+Now the exponent $1-c\Delta_{\min}$ is negative, so the non-target ratio decays rather than grows. Target attention no longer drifts downward and remains flat at `0.9999` at 10M. This is the successful learned-log case.
 
 | Run | $c$ | $\Delta_{\min}$ (worst) | $c\Delta_{\min}$ | Target attention @ 10M |
 |---|---:|---:|---:|---:|
 | `learned_log_e200_t3_nt1` | 0.1036 | 8.301 | 0.860 | 0.9982 (drifting down) |
 | `learned_log_e300_t3_nt1` | 0.1195 | 8.518 | 1.018 | 0.9999 (flat) |
 
-This directly answers the question that motivated the rerun: **with a slightly larger training budget, $c\Delta_{\min}$ is no longer below 1** — it moves from `0.860` to `1.018`, exactly the "learned-log succeeds once enough optimization pushes $c\Delta > 1$" behavior first seen in Stage 3, now confirmed for the non-binary task.
+This is the intended contrast: e200 is empirically correct through 10M but below the asymptotic threshold, while e300 crosses $c\Delta_{\min} > 1$ and becomes the genuine learned-log success case.
 
 ## Interpretation
 
