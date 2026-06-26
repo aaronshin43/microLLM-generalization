@@ -194,6 +194,11 @@ Output root:
 runs/stage4a/
 ```
 
+The experiment was repeated with seeds `42`, `43`, and `44`. The detailed tables below use seed `42` as the representative run.
+
+For seeds `43` and `44`, an additional `learned_log_e400_t3_nt1` run was added to test whether
+more optimization reliably pushes the learned-log diagnostic over threshold.
+
 | Run | Multiplier mode | Max train steps |
 |---|---|---:|
 | `constant_e100_t3_nt1` | `constant` | 3200 |
@@ -218,6 +223,8 @@ All four runs reach train and validation accuracy `1.000` at the training length
 | `log_e50_t3_nt1` | 1.000 | 1.000 | 1.000 | 1.0000 | 4.262 | 4.110 | n/a |
 | `learned_log_e200_t3_nt1` | 1.000 | 1.000 | 1.000 | 0.9982 | 8.456 | 8.301 | 0.860 |
 | `learned_log_e300_t3_nt1` | 1.000 | 1.000 | 1.000 | 0.9999 | 8.670 | 8.518 | 1.018 |
+
+These are the seed `42` results.
 
 The qualitative pattern matches the rest of Stage 3:
 
@@ -249,23 +256,56 @@ As $n$ grows, $m_{\text{non}}(n) \to 1$ and $m_h(n) \to 0$, so the target slot c
 
 ## Graceful Failure: Presence Collapse, Not Type Confusion
 
-The multi-class decomposition confirms the central Stage 4A prediction. As the constant run fails, positives are reassigned to the $n$ class, **never** to a wrong target type:
+The multi-class decomposition confirms the central Stage 4A prediction: as the constant run
+fails, positives are reassigned to the $n$ class, **never** to a wrong target type. Eval-only
+checks around the constant-mode transition region under `runs/stage4a/eval_only_checks/` make
+this sharper. These checks use the trained constant models and evaluate a denser set of
+lengths around the partial-collapse region.
 
-| Length | Predicted-none frac (positives) | Predicted-other-target frac (positives) |
-|---:|---:|---:|
-| 10000 | 0.667 | 0.000 |
-| 100000 | 1.000 | 0.000 |
-| 10000000 | 1.000 | 0.000 |
+The transition is not a smooth sample-level degradation. Because positives are stratified
+evenly over the three target types, aggregate positive accuracy falls in one-third steps as
+whole target types flip from the correct target class to the $n$ class. Across all three
+seeds, the predicted-other-target fraction stays exactly `0.000` throughout the dense
+transition. Even in the transition region, the model does not confuse identity; each failing
+target type collapses directly to $n$.
 
-The identity axis is robust; the bottleneck is purely the presence axis. Moreover, the collapse is **margin-ordered** across target types — the type with the largest margin survives longest:
+| Seed | Dense eval lengths | First observed partial collapse | Full collapse | Last surviving target type | Max wrong-target frac |
+|---:|---:|---:|---:|---|---:|
+| 42 | 6000-11000 | 6250 | 10500 | $t_0$ | 0.000 |
+| 43 | 5500-7000 | 5500 | 6750 | $t_2$ | 0.000 |
+| 44 | 4500-9500 | 4500 | 9500 | $t_1$ | 0.000 |
 
-| Length | $t_0$ recall ($\Delta = 9.356$) | $t_1$ recall ($\Delta = 8.922$) | $t_2$ recall ($\Delta = 8.932$) |
-|---:|---:|---:|---:|
-| 1000 | 1.000 | 1.000 | 1.000 |
-| 10000 | 1.000 | 0.000 | 0.000 |
-| 100000 | 0.000 | 0.000 | 0.000 |
+The last surviving type is the type with the largest margin in that seed. This is the
+multi-class analogue of the Stage 3D/3E worst-margin diagnostic: **the class is only as robust
+as its smallest-margin target type, and the smallest-margin type fails first.** The transition
+length is roughly on the expected $e^{\Delta_h}$ scale, but the exact flip point also depends
+on the learned linear head's class boundary.
 
-At length 10000 only $t_0$ — the largest-margin type — still survives, which is exactly why the aggregate positive-correct fraction is `0.333` there. This is the multi-class analogue of the Stage 3D/3E worst-margin diagnostic: **the class is only as robust as its smallest-margin target type, and that type fails first.**
+Seed `42` shows the stepwise target-type transition most clearly:
+
+| Length | Positive-correct frac | Predicted-none frac | Wrong-target frac | Mean target attention | $t_0$ recall | $t_1$ recall | $t_2$ recall |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 6000 | 1.000 | 0.000 | 0.000 | 0.591 | 1.000 | 1.000 | 1.000 |
+| 6250 | 0.667 | 0.333 | 0.000 | 0.581 | 1.000 | 0.000 | 1.000 |
+| 6500 | 0.667 | 0.333 | 0.000 | 0.571 | 1.000 | 0.000 | 1.000 |
+| 6750 | 0.667 | 0.333 | 0.000 | 0.562 | 1.000 | 0.000 | 1.000 |
+| 7000 | 0.333 | 0.667 | 0.000 | 0.553 | 1.000 | 0.000 | 0.000 |
+| 7250 | 0.333 | 0.667 | 0.000 | 0.545 | 1.000 | 0.000 | 0.000 |
+| 7500 | 0.333 | 0.667 | 0.000 | 0.536 | 1.000 | 0.000 | 0.000 |
+| 7750 | 0.333 | 0.667 | 0.000 | 0.528 | 1.000 | 0.000 | 0.000 |
+| 8000 | 0.333 | 0.667 | 0.000 | 0.520 | 1.000 | 0.000 | 0.000 |
+| 8250 | 0.333 | 0.667 | 0.000 | 0.513 | 1.000 | 0.000 | 0.000 |
+| 8500 | 0.333 | 0.667 | 0.000 | 0.505 | 1.000 | 0.000 | 0.000 |
+| 8750 | 0.333 | 0.667 | 0.000 | 0.498 | 1.000 | 0.000 | 0.000 |
+| 9000 | 0.333 | 0.667 | 0.000 | 0.491 | 1.000 | 0.000 | 0.000 |
+| 9250 | 0.333 | 0.667 | 0.000 | 0.485 | 1.000 | 0.000 | 0.000 |
+| 9500 | 0.333 | 0.667 | 0.000 | 0.478 | 1.000 | 0.000 | 0.000 |
+| 9750 | 0.333 | 0.667 | 0.000 | 0.472 | 1.000 | 0.000 | 0.000 |
+| 10000 | 0.333 | 0.667 | 0.000 | 0.465 | 1.000 | 0.000 | 0.000 |
+| 10250 | 0.333 | 0.667 | 0.000 | 0.459 | 1.000 | 0.000 | 0.000 |
+| 10500 | 0.000 | 1.000 | 0.000 | 0.453 | 0.000 | 0.000 | 0.000 |
+| 10750 | 0.000 | 1.000 | 0.000 | 0.448 | 0.000 | 0.000 | 0.000 |
+| 11000 | 0.000 | 1.000 | 0.000 | 0.442 | 0.000 | 0.000 | 0.000 |
 
 ## Fixed-Log Behavior
 
@@ -298,20 +338,22 @@ r_{\text{non}/h}(n) \approx e^{-\Delta_{\min}} n^{1-c\Delta_{\min}}
 
 The exponent is positive, so the ratio eventually grows. The prefactor is tiny, so the expected failure point is pushed far beyond the benchmark, around length $10^{25}$. Thus e200 passes the 10M evaluation, but it should still fail asymptotically.
 
-**e300 (9600 steps).** The rerun increases both the learned coefficient and the worst raw margin enough to cross the threshold:
+**e300 (9600 steps).** With seed `42`, the rerun increases both the learned coefficient and the worst raw margin enough to cross the threshold:
 
 ```math
 c = 0.1195,\quad \Delta_{\min} = 8.518,\quad c\,\Delta_{\min} = 1.018 > 1.
 ```
 
-Now the exponent $1-c\Delta_{\min}$ is negative, so the non-target ratio decays rather than grows. Target attention no longer drifts downward and remains flat at `0.9999` at 10M. This is the successful learned-log case.
+Now the exponent $1-c\Delta_{\min}$ is negative, so the non-target ratio decays rather than grows. Target attention no longer drifts downward and remains flat at `0.9999` at 10M. This shows that with enough optimization, the learned-log model can push $c\Delta_{\min}$ above 1 in the Stage 4A non-binary task.
 
 | Run | $c$ | $\Delta_{\min}$ (worst) | $c\Delta_{\min}$ | Target attention @ 10M |
 |---|---:|---:|---:|---:|
 | `learned_log_e200_t3_nt1` | 0.1036 | 8.301 | 0.860 | 0.9982 (drifting down) |
 | `learned_log_e300_t3_nt1` | 0.1195 | 8.518 | 1.018 | 0.9999 (flat) |
 
-This is the intended contrast: e200 is empirically correct through 10M but below the asymptotic threshold, while e300 crosses $c\Delta_{\min} > 1$ and becomes the genuine learned-log success case.
+This is the intended contrast in the representative seed: e200 is empirically correct through 10M but below the asymptotic threshold, while additional optimization pushes the learned-log run across $c\Delta_{\min} > 1$.
+
+Across seeds, the exact optimization budget needed for this crossing is seed-dependent. Seeds `43` and `44` did not reliably clear the threshold at e300 (`0.956` and `0.999` worst $c\Delta_{\min}$ respectively), but both cleared it at e400 (`1.084` and `1.135`). Compared with the Stage 3 learned-log experiments, Stage 4A needed more optimization steps to make the learned coefficient and worst-case margin jointly exceed the threshold.
 
 ## Interpretation
 
@@ -334,8 +376,8 @@ Because identity rides entirely on top of presence, the non-binary head inherits
 
 - Constant scaling fails at long length via positive→none collapse.
 - Fixed-log succeeds with a comfortable margin.
-- Learned-log e200 passes the $10^7$ benchmark but with $c\Delta_{\min} = 0.860 < 1$, so it is asymptotically incomplete (target attention is still slowly diluting).
-- Learned-log e300 crosses the threshold with $c\Delta_{\min} = 1.018 > 1$ and reaches a genuinely flat, length-invariant attention profile.
+- Learned-log e200 passes the $10^7$ benchmark in the representative seed but with $c\Delta_{\min} = 0.860 < 1$, so it is asymptotically incomplete (target attention is still slowly diluting).
+- With enough optimization, learned-log crosses the threshold and reaches a genuinely flat, length-invariant attention profile; seed `42` crossed at e300, while seeds `43` and `44` crossed at e400.
 
 The main new finding is structural:
 
@@ -345,7 +387,6 @@ The main new finding is structural:
 
 - Only `target_token_count = 3` and `non_target_token_count = 1` were tested.
 - The target was fixed at position 0 (`fixed_start`).
-- Only one seed was analyzed.
 - Positive examples contained exactly one target token; multiple target occurrences and mixed-type sequences were not tested.
-- The $c\Delta_{\min} \approx 1.018$ crossing in e300 is only modestly above threshold; it was not stress-tested with more target types or non-target types.
+- The learned-log threshold crossing is seed-dependent and was only tested at the current optimization budgets; it was not stress-tested with more target types or non-target types.
 - This result applies only to the reduced, no-positional-encoding model and does not automatically transfer to the full Stage 1/2 transformer.
