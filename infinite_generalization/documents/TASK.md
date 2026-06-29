@@ -1,3 +1,296 @@
+# Task: Stage 4B Ablation 1 - Unnormalized Attention Sum
+
+## Objective
+
+Stage 4B showed that the strict normalized softmax-attention counting baseline can fit the
+training length but fails to length-generalize exact counts. At long length, all final e500
+runs collapse to predicting count 0.
+
+This task starts the follow-up ablation suite, but **only Ablation 1** should be implemented
+and run for now:
+
+```text
+Ablation 1: replace the normalized softmax attention mass readout with an unnormalized
+attention sum readout.
+```
+
+The central question is:
+
+**Does Stage 4B counting fail because softmax normalization removes the absolute count scale?**
+
+This ablation should be treated as a diagnostic experiment, not as a replacement for the main
+Stage 4B conclusion.
+
+## Background
+
+The current strict baseline reads count information through normalized attention mass:
+
+```math
+m_k(n) =
+\frac{k e^{\alpha\Delta}}{k e^{\alpha\Delta} + (n-k)}.
+```
+
+This is a convex-average statistic. It can distinguish counts at the training length, but it
+does not preserve absolute multiplicity in a length-invariant way. Depending on the regime,
+positive counts can collapse toward 0 target mass or saturate toward 1 target mass.
+
+Ablation 1 removes the softmax denominator from the value readout. For a target type $h$, use
+the unnormalized numerator:
+
+```math
+u_h(n) =
+\sum_{j:\,x_j=t_h} e^{\alpha s_j}.
+```
+
+For the single-target-type base case with $k$ target occurrences and target score $a$:
+
+```math
+u_t(n) = k e^{\alpha a}.
+```
+
+Unlike $m_k(n)$, this preserves an explicit multiplicative factor $k$. The ablation therefore
+tests whether count information becomes more stable once the readout is no longer divided by
+the full sequence-level denominator.
+
+## Scope
+
+Implement and run only the unnormalized attention sum ablation.
+
+Do not implement the other candidate ablations yet:
+
+- denominator or log-denominator readout,
+- parallel detector plus sum pooling,
+- hand-coded count or length features,
+- decoder-style outputs.
+
+Those can be considered after Ablation 1 is analyzed.
+
+## Baseline To Compare Against
+
+Use the Stage 4B strict baseline report and run directory as the comparison point:
+
+```text
+documents/STAGE4B_COUNTING_TARGET_OCCURRENCES.md
+runs/stage4b/
+```
+
+The most important baseline runs are the final e500 runs:
+
+```text
+runs/stage4b/constant_e500_t1_nt1_k3
+runs/stage4b/log_e500_t1_nt1_k3
+runs/stage4b/learned_log_e500_t1_nt1_k3
+```
+
+The baseline result to compare against is:
+
+```text
+train length fit: succeeds
+10M evaluation: all examples predicted as count 0
+balanced accuracy at 10M: 0.250
+```
+
+## Model Change
+
+Keep the Stage 4B dataset, labels, classifier loss, multiplier modes, and chunked evaluation
+unchanged.
+
+Add a readout mode flag, for example:
+
+```text
+readout_mode = softmax_mass | unnormalized_sum
+```
+
+The existing behavior should remain the default:
+
+```text
+softmax_mass:
+    value_output = [normalized target mass(es), normalized non-target mass]
+```
+
+Ablation 1 should use:
+
+```text
+unnormalized_sum:
+    value_output = [target numerator sum(s), non-target numerator sum]
+```
+
+For general $H$ target token types:
+
+```math
+u_h =
+\sum_{j:\,x_j=t_h} e^{\alpha s_j},
+\qquad
+u_{\text{non}} =
+\sum_{j:\,x_j\ \text{non-target}} e^{\alpha s_j}.
+```
+
+The classifier shape stays the same:
+
+```text
+classifier = Linear(H + 1, K + 1)
+loss       = cross-entropy over count classes
+```
+
+For the base setting $H = 1$:
+
+```text
+value_output = [target_unnormalized_sum, non_target_unnormalized_sum]
+classifier   = Linear(2, K + 1)
+```
+
+Important implementation detail: do not remove or break the current normalized baseline path.
+The new readout mode should be additive so the original Stage 4B runs remain reproducible.
+
+## Numerical Handling
+
+The unnormalized numerator is based on exponentiated corrected scores:
+
+```math
+e^{\alpha s_j}.
+```
+
+Implement this carefully enough for the existing 10M evaluation sweep. If numerical overflow
+appears, prefer a documented log-space or stable variant over silent clipping. If a stable
+variant is used, record it clearly in the config and report because it changes the exact
+readout interpretation.
+
+For the first pass, keep the implementation as close as possible to the literal numerator
+definition and inspect whether the observed score ranges are safe.
+
+## Diagnostics
+
+Keep the existing Stage 4B metrics and add enough metadata to distinguish the ablation from
+the baseline:
+
+```text
+readout_mode
+overall accuracy
+per-count recall
+count confusion matrix
+mean predicted count
+mean absolute count error
+mean target readout by true count
+mean non-target readout by true count
+mean and worst target/non-target margin Delta
+c and c * Delta for learned_log
+```
+
+If possible, retain the normalized attention mass as a diagnostic even when the classifier
+uses `unnormalized_sum`. This makes it easier to compare "what the classifier saw" against
+"what the original baseline would have seen."
+
+## Implementation Plan
+
+### Step 1: Add Readout Mode
+
+Update the Stage 4B counting model so it supports both:
+
+```text
+softmax_mass
+unnormalized_sum
+```
+
+The existing default path must remain `softmax_mass`.
+
+### Step 2: Evaluation And CSVs
+
+Thread `readout_mode` through config, CLI, saved config JSON, metrics CSVs, count metrics, and
+confusion outputs.
+
+Make sure chunked evaluation still works at length 10M.
+
+### Step 3: Tests
+
+Add or update tests under `infinite_generalization/tests/`:
+
+1. Existing `softmax_mass` tests still pass unchanged.
+2. `unnormalized_sum` value output equals the sum of $e^{\alpha s_j}$ over matching token
+   positions on a small deterministic batch.
+3. For identical target scores, the target readout increases with true count.
+4. The count head still has output dimension `K + 1`.
+5. Chunked evaluation matches single-chunk evaluation for `unnormalized_sum`.
+6. A tiny config runs end to end for `unnormalized_sum`.
+
+### Step 4: Smoke Runs
+
+Run tiny smoke configurations for `unnormalized_sum` with:
+
+```text
+constant
+log
+learned_log
+```
+
+Use small lengths, small `K`, and small train steps first.
+
+### Step 5: Main Runs
+
+Run the same base Stage 4B setting used in the strict baseline:
+
+```text
+target_token_count     = 1
+non_target_token_count = 1
+max_target_count       = 3
+target_position_mode   = fixed_start
+train_length           = 10
+eval_sampling_mode     = stratified
+eval_lengths           = 10 ... 10000000
+```
+
+Use an output directory that clearly separates this ablation from the baseline:
+
+```text
+runs/stage4b/ablation1_unnormalized/
+```
+
+Recommended run names:
+
+```text
+constant_e500_t1_nt1_k3
+log_e500_t1_nt1_k3
+learned_log_e500_t1_nt1_k3
+```
+
+If the first run shows that e500 is clearly undertrained, add a longer run rather than
+overwriting the e500 output.
+
+## Analysis Questions
+
+After the runs complete, answer:
+
+```text
+Does unnormalized_sum fit the training length?
+Does it avoid the count-0 collapse at 10M?
+Does constant scaling become enough when the denominator is removed?
+Does log or learned_log create a new scale problem because the numerator grows with length?
+Are count classes separated by the unnormalized target readout at long length?
+Is the original failure mainly caused by softmax normalization, or by another bottleneck?
+```
+
+## Done Criteria
+
+This task is complete when:
+
+1. `readout_mode=unnormalized_sum` is implemented without breaking the existing
+   `softmax_mass` baseline.
+2. Tests cover the new readout path and chunked evaluation.
+3. Smoke runs pass for all three alpha modes.
+4. Main ablation runs complete under `runs/stage4b/ablation1_unnormalized/`.
+5. A short follow-up section or report update compares Ablation 1 against the strict Stage 4B
+   baseline.
+
+## Out Of Scope
+
+- Denominator or log-denominator features.
+- Parallel detector plus sum pooling.
+- Multi-target-type counting.
+- Multi-length training.
+- Position-dependent tasks.
+- Any report rewrite beyond the Ablation 1 comparison needed after the run.
+
+<!-- Previous completed Stage 4B baseline task retained below for reference only.
+
 # Task: Stage 4B Counting Target Occurrences
 
 ## Objective
@@ -319,3 +612,4 @@ This task is complete when:
 - Adding a decoder.
 - Adding hand-coded count or length features before the strict normalized-attention baseline is
   evaluated.
+-->
