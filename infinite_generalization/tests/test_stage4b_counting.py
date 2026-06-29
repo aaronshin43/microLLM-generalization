@@ -91,6 +91,7 @@ class Stage4BModelTest(unittest.TestCase):
         non_target_token_count: int = 2,
         max_target_count: int = 4,
         alpha_mode: str = "constant",
+        readout_mode: str = "softmax_mass",
     ) -> SimplifiedLastQueryAttentionCounter:
         torch.manual_seed(0)
         return SimplifiedLastQueryAttentionCounter(
@@ -100,6 +101,7 @@ class Stage4BModelTest(unittest.TestCase):
             target_token_count=target_token_count,
             non_target_token_count=non_target_token_count,
             max_target_count=max_target_count,
+            readout_mode=readout_mode,
         )
 
     def test_value_masses_sum_to_one_per_example(self) -> None:
@@ -119,6 +121,7 @@ class Stage4BModelTest(unittest.TestCase):
             target_token_count=1,
             non_target_token_count=1,
             max_target_count=max_target_count,
+            readout_mode="unnormalized_sum",
         )
         tokens = torch.tensor([[0, 1, 1, 1], [1, 1, 1, 1]])
         logits = model(tokens)
@@ -126,11 +129,63 @@ class Stage4BModelTest(unittest.TestCase):
         self.assertEqual(model.classifier.out_features, max_target_count + 1)
         self.assertEqual(logits.shape, (2, max_target_count + 1))
 
+    def test_unnormalized_sum_matches_exp_corrected_score_sums(self) -> None:
+        model = self.make_model(
+            target_token_count=2,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="unnormalized_sum",
+        )
+        tokens = torch.tensor([[0, 2, 1, 2], [2, 0, 0, 2]])
+        _, details = model(tokens, return_details=True)
+        numerators = torch.exp(details["corrected_scores"])
+        expected = torch.stack(
+            [
+                numerators.masked_fill(tokens.ne(0), 0.0).sum(dim=1),
+                numerators.masked_fill(tokens.ne(1), 0.0).sum(dim=1),
+                numerators.masked_fill(tokens.lt(2), 0.0).sum(dim=1),
+            ],
+            dim=1,
+        )
+
+        self.assertTrue(torch.allclose(details["attention_output"], expected, atol=1e-6))
+        self.assertTrue(
+            torch.allclose(
+                details["normalized_attention_output"].sum(dim=1),
+                torch.ones(tokens.shape[0]),
+                atol=1e-6,
+            )
+        )
+
+    def test_unnormalized_target_readout_increases_with_true_count(self) -> None:
+        model = self.make_model(
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="unnormalized_sum",
+        )
+        tokens = torch.tensor(
+            [
+                [0, 1, 1, 1],
+                [0, 0, 1, 1],
+                [0, 0, 0, 1],
+            ]
+        )
+        _, details = model(tokens, return_details=True)
+        target_readout = details["attention_output"][:, 0]
+
+        self.assertGreater(target_readout[1].item(), target_readout[0].item())
+        self.assertGreater(target_readout[2].item(), target_readout[1].item())
+
 
 class Stage4BEvalTest(unittest.TestCase):
     """Validate Stage 4B evaluation and chunking."""
 
-    def make_model(self) -> SimplifiedLastQueryAttentionCounter:
+    def make_model(
+        self,
+        *,
+        readout_mode: str = "softmax_mass",
+    ) -> SimplifiedLastQueryAttentionCounter:
         torch.manual_seed(7)
         return SimplifiedLastQueryAttentionCounter(
             d_head=2,
@@ -139,11 +194,18 @@ class Stage4BEvalTest(unittest.TestCase):
             target_token_count=2,
             non_target_token_count=1,
             max_target_count=3,
+            readout_mode=readout_mode,
         )
 
-    def evaluate(self, *, examples: int, eval_chunk_examples: int):
+    def evaluate(
+        self,
+        *,
+        examples: int,
+        eval_chunk_examples: int,
+        readout_mode: str = "softmax_mass",
+    ):
         return evaluate_length(
-            self.make_model(),
+            self.make_model(readout_mode=readout_mode),
             length=10,
             examples=examples,
             eval_chunk_examples=eval_chunk_examples,
@@ -161,6 +223,23 @@ class Stage4BEvalTest(unittest.TestCase):
     def test_chunked_evaluation_matches_single_chunk_evaluation(self) -> None:
         single = self.evaluate(examples=24, eval_chunk_examples=24)
         chunked = self.evaluate(examples=24, eval_chunk_examples=5)
+        self.assert_evaluations_match(single, chunked)
+
+    def test_unnormalized_chunked_evaluation_matches_single_chunk_evaluation(self) -> None:
+        single = self.evaluate(
+            examples=24,
+            eval_chunk_examples=24,
+            readout_mode="unnormalized_sum",
+        )
+        chunked = self.evaluate(
+            examples=24,
+            eval_chunk_examples=5,
+            readout_mode="unnormalized_sum",
+        )
+        self.assert_evaluations_match(single, chunked)
+
+    def assert_evaluations_match(self, single, chunked) -> None:
+        """Assert equal evaluation outputs except chunk-size metadata."""
 
         single_metrics, single_counts, single_confusion, single_types = single
         chunked_metrics, chunked_counts, chunked_confusion, chunked_types = chunked
@@ -245,6 +324,65 @@ class Stage4BDefaultRunTest(unittest.TestCase):
                 )
                 self.assertEqual(len(target_type_rows), config.target_token_count)
                 self.assertTrue(0.0 <= metric_rows[0]["accuracy"] <= 1.0)
+
+    def test_tiny_train_and_eval_runs_for_unnormalized_sum(self) -> None:
+        base_output_dir = ROOT / "runs" / "_test_stage4b_counting"
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = base_output_dir / "unnormalized_sum"
+        output_dir.mkdir(exist_ok=True)
+        config = Stage4BConfig(
+            seed=43,
+            device="cpu",
+            output_dir=str(output_dir),
+            alpha_mode="constant",
+            readout_mode="unnormalized_sum",
+            train_length=8,
+            target_position_mode="nonfinal_random",
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=2,
+            train_examples=24,
+            val_examples=12,
+            test_examples=12,
+            eval_chunk_examples=5,
+            eval_sampling_mode="stratified",
+            eval_lengths=(8, 12),
+            batch_size=8,
+            eval_batch_size=4,
+            epochs=1,
+            max_train_steps=2,
+        )
+
+        model, updates = train_model(
+            config,
+            device=torch.device("cpu"),
+            output_dir=output_dir,
+        )
+        self.assertGreater(updates, 0)
+        metric_rows, count_rows, confusion_rows, target_type_rows = evaluate_length(
+            model,
+            length=12,
+            examples=config.test_examples,
+            eval_chunk_examples=config.eval_chunk_examples,
+            eval_sampling_mode=config.eval_sampling_mode,
+            batch_size=config.eval_batch_size,
+            seed=config.seed + 10_000 + 12,
+            target_position_mode=config.target_position_mode,
+            target_token_count=config.target_token_count,
+            non_target_token_count=config.non_target_token_count,
+            non_target_sampling=config.non_target_sampling,
+            max_target_count=config.max_target_count,
+            device=torch.device("cpu"),
+        )
+
+        self.assertEqual(metric_rows[0]["readout_mode"], "unnormalized_sum")
+        self.assertEqual(len(count_rows), config.max_target_count + 1)
+        self.assertEqual(
+            len(confusion_rows),
+            (config.max_target_count + 1) * (config.max_target_count + 1),
+        )
+        self.assertEqual(len(target_type_rows), config.target_token_count)
+        self.assertTrue(0.0 <= metric_rows[0]["accuracy"] <= 1.0)
 
 
 if __name__ == "__main__":

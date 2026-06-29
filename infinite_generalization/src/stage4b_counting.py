@@ -39,6 +39,7 @@ class Stage4BConfig:
     device: str = "auto"
     output_dir: str = "runs/stage4b_counting"
     alpha_mode: str = "constant"
+    readout_mode: str = "softmax_mass"
     train_length: int = 10
     train_lengths: tuple[int, ...] = ()
     target_position_mode: str = "fixed_start"
@@ -421,6 +422,8 @@ def iter_count_eval_batches(
 class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier):
     """Reduced last-query attention model with a count-class readout."""
 
+    READOUT_MODES = {"softmax_mass", "unnormalized_sum"}
+
     def __init__(
         self,
         *,
@@ -430,6 +433,7 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
         target_token_count: int = 1,
         non_target_token_count: int = 1,
         max_target_count: int = 3,
+        readout_mode: str = "softmax_mass",
     ) -> None:
         super().__init__(
             d_head=d_head,
@@ -440,7 +444,10 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
         )
         if max_target_count < 1:
             raise ValueError("max_target_count must be at least 1.")
+        if readout_mode not in self.READOUT_MODES:
+            raise ValueError(f"Unsupported readout_mode: {readout_mode}")
         self.max_target_count = max_target_count
+        self.readout_mode = readout_mode
         self.value_dim = target_token_count + 1
         self.num_count_classes = max_target_count + 1
         self.classifier = nn.Linear(self.value_dim, self.num_count_classes)
@@ -462,6 +469,73 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
         ).sum(dim=1)
         return torch.stack(masses + [non_target_mass], dim=1)
 
+    def unnormalized_value_output(
+        self,
+        tokens: torch.Tensor,
+        corrected_scores: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return per-type unnormalized numerator sums from exponentiated scores."""
+
+        numerator_values = torch.exp(corrected_scores)
+        sums = [
+            numerator_values.masked_fill(tokens.ne(token_id), 0.0).sum(dim=1)
+            for token_id in range(self.target_token_count)
+        ]
+        non_target_sum = numerator_values.masked_fill(
+            tokens.lt(self.target_token_count),
+            0.0,
+        ).sum(dim=1)
+        return torch.stack(sums + [non_target_sum], dim=1)
+
+    def readout_value_output(
+        self,
+        tokens: torch.Tensor,
+        attention_weights: torch.Tensor,
+        corrected_scores: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return the configured classifier readout."""
+
+        if self.readout_mode == "softmax_mass":
+            return self.token_value_output(tokens, attention_weights)
+        return self.unnormalized_value_output(tokens, corrected_scores)
+
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        *,
+        return_details: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Run last-query attention with the configured Stage 4B value readout."""
+
+        length = tokens.shape[1]
+        keys = self.project_tokens(tokens, self.key_projection)
+        last_query = self.project_tokens(tokens[:, -1], self.query_projection)
+        raw_scores = torch.einsum("bd,bld->bl", last_query, keys) / math.sqrt(self.d_head)
+        alpha = self.alpha_for_length(length, tokens.device)
+        corrected_scores = alpha * raw_scores
+        attention_weights = torch.softmax(corrected_scores, dim=-1)
+        normalized_attention_output = self.token_value_output(tokens, attention_weights)
+        attention_output = self.readout_value_output(
+            tokens,
+            attention_weights,
+            corrected_scores,
+        )
+        logits = self.classifier(attention_output)
+
+        if not return_details:
+            return logits
+
+        details = {
+            "raw_scores": raw_scores,
+            "corrected_scores": corrected_scores,
+            "attention_weights": attention_weights,
+            "attention_output": attention_output,
+            "normalized_attention_output": normalized_attention_output,
+            "last_query": last_query,
+            "alpha": alpha.expand(tokens.shape[0]),
+        }
+        return logits, details
+
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
@@ -474,6 +548,11 @@ def parse_args() -> argparse.Namespace:
         "--alpha-mode",
         choices=("constant", "log", "learned_log"),
         default=Stage4BConfig.alpha_mode,
+    )
+    parser.add_argument(
+        "--readout-mode",
+        choices=("softmax_mass", "unnormalized_sum"),
+        default=Stage4BConfig.readout_mode,
     )
     parser.add_argument("--train-length", type=int, default=Stage4BConfig.train_length)
     parser.add_argument("--train-lengths", type=int, nargs="+", default=None)
@@ -545,6 +624,8 @@ def build_config(args: argparse.Namespace) -> Stage4BConfig:
         raise ValueError("All evaluation lengths must be greater than max_target_count.")
     if args.max_train_steps is not None and args.max_train_steps < 1:
         raise ValueError("--max-train-steps must be positive when provided.")
+    if args.readout_mode not in SimplifiedLastQueryAttentionCounter.READOUT_MODES:
+        raise ValueError(f"Unsupported readout mode: {args.readout_mode}")
     if args.target_token_count < 1:
         raise ValueError("--target-token-count must be at least 1.")
     if args.non_target_token_count < 1:
@@ -559,6 +640,7 @@ def build_config(args: argparse.Namespace) -> Stage4BConfig:
         device=args.device,
         output_dir=output_dir,
         alpha_mode=args.alpha_mode,
+        readout_mode=args.readout_mode,
         train_length=args.train_length,
         train_lengths=train_lengths,
         target_position_mode=args.target_position_mode,
@@ -677,11 +759,19 @@ def evaluate_length(
     model.eval()
     all_preds: list[torch.Tensor] = []
     all_labels: list[torch.Tensor] = []
-    target_masses: list[torch.Tensor] = []
-    non_target_masses: list[torch.Tensor] = []
+    target_readouts: list[torch.Tensor] = []
+    non_target_readouts: list[torch.Tensor] = []
+    target_attention_masses: list[torch.Tensor] = []
+    non_target_attention_masses: list[torch.Tensor] = []
     pos_min_margins: list[torch.Tensor] = []
     alpha_values: list[torch.Tensor] = []
-    target_type_mass_values: dict[int, list[torch.Tensor]] = {
+    max_corrected_scores: list[torch.Tensor] = []
+    max_readout_values: list[torch.Tensor] = []
+    readout_finite_values: list[torch.Tensor] = []
+    target_type_readout_values: dict[int, list[torch.Tensor]] = {
+        token_id: [] for token_id in range(target_token_count)
+    }
+    target_type_attention_mass_values: dict[int, list[torch.Tensor]] = {
         token_id: [] for token_id in range(target_token_count)
     }
     target_type_present_values: dict[int, list[torch.Tensor]] = {
@@ -712,18 +802,31 @@ def evaluate_length(
         target_ids = target_ids.to(device)
         logits, details = model(tokens, return_details=True)
         preds = logits.argmax(dim=1)
-        attention_output = details["attention_output"]
-        target_mass = attention_output[:, :target_token_count].sum(dim=1)
-        non_target_mass = attention_output[:, target_token_count]
+        readout_output = details["attention_output"]
+        normalized_attention_output = details["normalized_attention_output"]
+        target_readout = readout_output[:, :target_token_count].sum(dim=1)
+        non_target_readout = readout_output[:, target_token_count]
+        target_attention_mass = normalized_attention_output[:, :target_token_count].sum(dim=1)
+        non_target_attention_mass = normalized_attention_output[:, target_token_count]
 
         all_preds.append(preds.cpu())
         all_labels.append(labels.cpu())
-        target_masses.append(target_mass.cpu())
-        non_target_masses.append(non_target_mass.cpu())
+        target_readouts.append(target_readout.cpu())
+        non_target_readouts.append(non_target_readout.cpu())
+        target_attention_masses.append(target_attention_mass.cpu())
+        non_target_attention_masses.append(non_target_attention_mass.cpu())
         alpha_values.append(details["alpha"].cpu())
+        max_corrected_scores.append(details["corrected_scores"].amax(dim=1).cpu())
+        max_readout_values.append(readout_output.detach().amax(dim=1).cpu())
+        readout_finite_values.append(
+            torch.isfinite(readout_output.detach()).all(dim=1).to(dtype=torch.float32).cpu()
+        )
 
         for token_id in range(target_token_count):
-            target_type_mass_values[token_id].append(attention_output[:, token_id].cpu())
+            target_type_readout_values[token_id].append(readout_output[:, token_id].cpu())
+            target_type_attention_mass_values[token_id].append(
+                normalized_attention_output[:, token_id].cpu()
+            )
             present = target_ids.eq(token_id).any(dim=1)
             target_type_present_values[token_id].append(present.cpu())
 
@@ -759,9 +862,14 @@ def evaluate_length(
 
     preds_cpu = torch.cat(all_preds)
     labels_cpu = torch.cat(all_labels)
-    target_mass_cpu = torch.cat(target_masses)
-    non_target_mass_cpu = torch.cat(non_target_masses)
+    target_readout_cpu = torch.cat(target_readouts)
+    non_target_readout_cpu = torch.cat(non_target_readouts)
+    target_attention_mass_cpu = torch.cat(target_attention_masses)
+    non_target_attention_mass_cpu = torch.cat(non_target_attention_masses)
     alpha_cpu = torch.cat(alpha_values)
+    max_corrected_score_cpu = torch.cat(max_corrected_scores)
+    max_readout_value_cpu = torch.cat(max_readout_values)
+    readout_finite_cpu = torch.cat(readout_finite_values)
     errors = (preds_cpu - labels_cpu).abs()
     learned_coefficient = model.learned_alpha_coefficient()
     pos_min_margins_cpu = (
@@ -775,6 +883,7 @@ def evaluate_length(
         "length": length,
         "split": "test",
         "alpha_mode": model.alpha_mode,
+        "readout_mode": model.readout_mode,
         "target_position_mode": target_position_mode,
         "target_token_count": target_token_count,
         "non_target_token_count": non_target_token_count,
@@ -789,8 +898,15 @@ def evaluate_length(
         "mean_predicted_count": preds_cpu.to(dtype=torch.float32).mean().item(),
         "mean_true_count": labels_cpu.to(dtype=torch.float32).mean().item(),
         "mean_absolute_count_error": errors.to(dtype=torch.float32).mean().item(),
-        "mean_target_attention_mass": _mean_or_nan(target_mass_cpu),
-        "mean_non_target_attention_mass": _mean_or_nan(non_target_mass_cpu),
+        "mean_target_readout": _mean_or_nan(target_readout_cpu),
+        "mean_non_target_readout": _mean_or_nan(non_target_readout_cpu),
+        "mean_target_attention_mass": _mean_or_nan(target_attention_mass_cpu),
+        "mean_non_target_attention_mass": _mean_or_nan(non_target_attention_mass_cpu),
+        "mean_max_corrected_score": _mean_or_nan(max_corrected_score_cpu),
+        "max_corrected_score": max_corrected_score_cpu.max().item(),
+        "mean_max_readout_value": _mean_or_nan(max_readout_value_cpu),
+        "max_readout_value": max_readout_value_cpu.max().item(),
+        "readout_finite_fraction": _mean_or_nan(readout_finite_cpu),
         "mean_min_margin_delta": mean_margin,
         "worst_min_margin_delta": worst_margin,
         "learned_alpha_coefficient": learned_coefficient,
@@ -812,6 +928,7 @@ def evaluate_length(
                 "length": length,
                 "split": "test",
                 "alpha_mode": model.alpha_mode,
+                "readout_mode": model.readout_mode,
                 "target_position_mode": target_position_mode,
                 "target_token_count": target_token_count,
                 "non_target_token_count": non_target_token_count,
@@ -824,8 +941,14 @@ def evaluate_length(
                 "recall": preds_cpu[mask].eq(count_value).float().mean().item(),
                 "mean_predicted_count": preds_cpu[mask].to(dtype=torch.float32).mean().item(),
                 "mean_absolute_count_error": errors[mask].to(dtype=torch.float32).mean().item(),
-                "mean_target_attention_mass": _mean_or_nan(target_mass_cpu[mask]),
-                "mean_non_target_attention_mass": _mean_or_nan(non_target_mass_cpu[mask]),
+                "mean_target_readout": _mean_or_nan(target_readout_cpu[mask]),
+                "mean_non_target_readout": _mean_or_nan(non_target_readout_cpu[mask]),
+                "mean_target_attention_mass": _mean_or_nan(
+                    target_attention_mass_cpu[mask]
+                ),
+                "mean_non_target_attention_mass": _mean_or_nan(
+                    non_target_attention_mass_cpu[mask]
+                ),
             }
         )
 
@@ -842,6 +965,7 @@ def evaluate_length(
                     "length": length,
                     "split": "test",
                     "alpha_mode": model.alpha_mode,
+                    "readout_mode": model.readout_mode,
                     "true_count": true_count,
                     "predicted_count": predicted_count,
                     "examples": cell,
@@ -851,16 +975,20 @@ def evaluate_length(
 
     target_type_rows: list[dict[str, Any]] = []
     for token_id in range(target_token_count):
-        mass = torch.cat(target_type_mass_values[token_id])
+        readout = torch.cat(target_type_readout_values[token_id])
+        mass = torch.cat(target_type_attention_mass_values[token_id])
         present = torch.cat(target_type_present_values[token_id])
         target_type_rows.append(
             {
                 "length": length,
                 "split": "test",
                 "alpha_mode": model.alpha_mode,
+                "readout_mode": model.readout_mode,
                 "target_token_id": token_id,
-                "examples": int(mass.numel()),
+                "examples": int(readout.numel()),
                 "present_examples": int(present.sum().item()),
+                "mean_readout": _mean_or_nan(readout),
+                "mean_readout_when_present": _mean_or_nan(readout[present]),
                 "mean_attention_mass": _mean_or_nan(mass),
                 "mean_attention_mass_when_present": _mean_or_nan(mass[present]),
             }
@@ -908,6 +1036,7 @@ def train_model(
         target_token_count=config.target_token_count,
         non_target_token_count=config.non_target_token_count,
         max_target_count=config.max_target_count,
+        readout_mode=config.readout_mode,
     ).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(
@@ -1021,6 +1150,7 @@ def main() -> None:
             "state_dict": model.state_dict(),
             "d_head": config.d_head,
             "alpha_mode": config.alpha_mode,
+            "readout_mode": config.readout_mode,
             "alpha_log_scale_init": config.alpha_log_scale_init,
             "target_token_count": config.target_token_count,
             "non_target_token_count": config.non_target_token_count,
