@@ -336,6 +336,86 @@ information. At length 10, the masses for counts 1, 2, and 3 are well separated,
 fits perfectly. The problem is that this count representation is not length-invariant. It is a
 relative mass tied to $n$, $\Delta$, and $\alpha$, not a stable absolute multiplicity signal.
 
+## Ablation 1: Unnormalized Attention Sum
+
+The first follow-up ablation replaced the normalized softmax-mass readout with an
+unnormalized numerator-sum readout:
+
+```math
+u_h =
+\sum_{j:\,x_j=t_h} e^{\alpha s_j},
+\qquad
+u_{\text{non}} =
+\sum_{j:\,x_j\ \text{non-target}} e^{\alpha s_j}.
+```
+
+The classifier still receives two values in the base $H = 1$ setting:
+
+```text
+[target numerator sum, non-target numerator sum]
+```
+
+The ablation outputs are under:
+
+```text
+runs/stage4b/ablation1_unnormalized/
+```
+
+All three e500 ablation runs fit the training length essentially perfectly:
+
+| Run | Train acc | Val acc | Train loss | Accuracy @ 10M |
+|---|---:|---:|---:|---:|
+| `constant_e500_t1_nt1_k3` | 1.000 | 1.000 | 4.09e-8 | 0.250 |
+| `log_e500_t1_nt1_k3` | 1.000 | 1.000 | 3.65e-8 | 0.250 |
+| `learned_log_e500_t1_nt1_k3` | 1.000 | 1.000 | 4.04e-8 | 0.250 |
+
+The training fit is stronger than the strict softmax baseline, but the long-length result is
+unchanged: at 10M, every run predicts count 0 for every example.
+
+The useful result is mechanistic. In the constant run, the **target numerator** preserves the
+count factor exactly across length:
+
+| True count | Target readout @ length 10 | Target readout @ 10M |
+|---:|---:|---:|
+| 1 | 57.90 | 57.90 |
+| 2 | 115.80 | 115.80 |
+| 3 | 173.71 | 173.71 |
+
+So removing the softmax denominator does make target-count information available. However,
+the same unnormalized readout also exposes a non-target numerator that grows with the number
+of non-target tokens. In the constant run, the non-target readout grows from about `138` at
+length 10 to about `1.38e8` at length 10M. The learned classifier uses this non-target feature
+strongly; for example, the constant-run class-0 head has a large positive weight on the
+non-target readout, while the class-3 head has a negative weight on it:
+
+| Class | Target-readout weight | Non-target-readout weight |
+|---:|---:|---:|
+| 0 | -0.749 | 0.711 |
+| 1 | -0.135 | 0.579 |
+| 2 | 0.374 | 0.207 |
+| 3 | 0.809 | -0.409 |
+
+At long length, the non-target numerator dominates the logits and pushes every example into
+class 0. The same qualitative behavior appears in fixed-log and learned-log. Their target
+numerators grow, but the non-target numerator remains much larger:
+
+| Run | Count 3 target/non-target readout ratio @ 10M |
+|---|---:|
+| `constant_e500_t1_nt1_k3` | 1.26e-6 |
+| `log_e500_t1_nt1_k3` | 0.0190 |
+| `learned_log_e500_t1_nt1_k3` | 9.30e-6 |
+
+Numerical overflow was not the cause of failure. The recorded `readout_finite_fraction` was
+`1.000` throughout the length sweep.
+
+This ablation refines the interpretation:
+
+**Softmax normalization is not the only bottleneck.** The target numerator does preserve count
+information, but including the unnormalized non-target numerator introduces a length-growing
+background scale that the classifier learns at the training length and cannot extrapolate
+through. The failure shifts from "normalized target mass loses count scale" to "unnormalized
+background scale overwhelms the count signal."
+
 ## Current Conclusion
 
 **The strict Stage 4B normalized-attention baseline fails exact count length generalization.**
@@ -354,7 +434,8 @@ The failure mode is positive-to-zero collapse:
 
 More importantly, Stage 4B suggests that exact counting is not solved by simply making the
 Stage 3/4A target-presence mechanism stronger. Counting needs either a calibrated critical
-regime or a representation that preserves count-like information more directly.
+regime or a representation that preserves count-like information more directly without also
+introducing an uncontrolled length-growing background scale.
 
 ## Limitations And Next Steps
 
@@ -370,11 +451,17 @@ Longer training reduces training loss but does not change the long-length failur
 longer lengths or multiple lengths may improve finite-length behavior, but it does not remove
 the underlying asymptotic tension of representing count through normalized mass.
 
-The next useful step is a small ablation suite that asks whether softmax normalization is the
-main bottleneck. Minimal candidates are:
+The first ablation has now tested the full unnormalized numerator readout
+`[target numerator, non-target numerator]`. It showed that the target numerator preserves
+count scale, but the non-target numerator creates a length-growing background feature. The
+next useful ablation is therefore more targeted: expose the target numerator while removing or
+controlling the non-target numerator.
 
-- replace softmax attention mass with an unnormalized target numerator,
-- add denominator or log-denominator information to the readout,
+Minimal candidates are:
+
+- use a target-numerator-only readout,
+- add denominator or log-denominator information to explicitly normalize the length-growing
+  background,
 - compare against a parallel detector followed by sum pooling.
 
 Those variants should be treated as diagnostic ablations, not as replacements for the main
