@@ -1,3 +1,333 @@
+# Task: Stage 4B Ablation 2 - Target Numerator Only
+
+## Objective
+
+Stage 4B Ablation 1 replaced normalized softmax attention mass with the full unnormalized
+readout:
+
+```text
+[target numerator sum, non-target numerator sum]
+```
+
+It showed that the target numerator preserves count information, but the non-target numerator
+introduces a length-growing background scale. At length 10M, the classifier still collapsed to
+predicting count 0 for every example.
+
+This task runs the next diagnostic ablation:
+
+```text
+Ablation 2: expose only the target numerator sum to the count classifier.
+```
+
+The central question is:
+
+**If the length-growing non-target background is removed, is the target numerator alone a
+stable count signal?**
+
+This is a diagnostic upper-bound style ablation. It is not intended to be a natural
+replacement architecture for the Stage 3/4A reduced model. Its purpose is to isolate whether
+the target numerator itself contains length-stable count information.
+
+## Background
+
+The strict Stage 4B baseline uses normalized softmax mass:
+
+```math
+m_k(n) =
+\frac{k e^{\alpha\Delta}}{k e^{\alpha\Delta} + (n-k)}.
+```
+
+This failed because the count signal is represented only as a length-dependent relative mass.
+
+Ablation 1 used unnormalized numerator sums:
+
+```math
+u_t =
+\sum_{j:\,x_j=t} e^{\alpha s_j},
+\qquad
+u_{\text{non}} =
+\sum_{j:\,x_j\ \text{non-target}} e^{\alpha s_j}.
+```
+
+In the constant run, $u_t$ preserved the count factor exactly across length:
+
+```text
+count 1: 57.90 at length 10 and 57.90 at length 10M
+count 2: 115.80 at length 10 and 115.80 at length 10M
+count 3: 173.71 at length 10 and 173.71 at length 10M
+```
+
+But $u_{\text{non}}$ grew from about `138` at length 10 to about `1.38e8` at length 10M, and
+the learned classifier used that non-target feature strongly. The result was still count-0
+collapse.
+
+Ablation 2 removes $u_{\text{non}}$ from the classifier input and tests whether $u_t$ alone is
+sufficient.
+
+## Scope
+
+Implement and run only the target-numerator-only diagnostic.
+
+Do not implement these variants yet:
+
+- denominator or log-denominator readout,
+- normalized non-target readout,
+- parallel detector plus sum pooling,
+- multi-length training,
+- multi-target-type counting.
+
+## Baselines To Compare Against
+
+Strict Stage 4B baseline:
+
+```text
+documents/STAGE4B_COUNTING_TARGET_OCCURRENCES.md
+runs/stage4b/
+```
+
+Ablation 1:
+
+```text
+runs/stage4b/ablation1_unnormalized/
+```
+
+Key comparison:
+
+```text
+strict softmax_mass baseline:
+    target count signal becomes length-dependent normalized mass
+    10M accuracy = 0.250
+
+ablation1 unnormalized_sum:
+    target numerator preserves count
+    non-target numerator grows with length
+    10M accuracy = 0.250
+
+ablation2 target_numerator_only:
+    test whether target numerator alone avoids both failure modes
+```
+
+## Model Change
+
+Keep the Stage 4B dataset, labels, loss, multiplier modes, and chunked evaluation unchanged.
+
+Add another readout mode, for example:
+
+```text
+readout_mode = softmax_mass | unnormalized_sum | target_numerator_only
+```
+
+The existing modes must remain reproducible:
+
+```text
+softmax_mass:
+    value_output = [normalized target mass(es), normalized non-target mass]
+
+unnormalized_sum:
+    value_output = [target numerator sum(s), non-target numerator sum]
+```
+
+Ablation 2 should use:
+
+```text
+target_numerator_only:
+    value_output = [target numerator sum]
+```
+
+For the current base setting $H = 1$:
+
+```math
+u_t =
+\sum_{j:\,x_j=t} e^{\alpha s_j}.
+```
+
+The classifier becomes:
+
+```text
+classifier = Linear(1, K + 1)
+loss       = cross-entropy over count classes
+```
+
+If the implementation is easier with a fixed two-dimensional input, using
+`[target numerator sum, 0]` is acceptable, but the report must state that the second dimension
+is a constant dummy feature. Prefer `Linear(1, K + 1)` if it can be done cleanly.
+
+For now, this ablation only needs to support `target_token_count = 1`. If supporting general
+$H$ is straightforward, the natural extension is:
+
+```text
+value_output = [sum over all target-type numerator sums]
+```
+
+because the Stage 4B label is total target occurrence count, not target identity.
+
+## Numerical Handling
+
+Use the same numerator definition as Ablation 1:
+
+```math
+e^{\alpha s_j}.
+```
+
+Keep existing finite-value diagnostics:
+
+```text
+mean_max_corrected_score
+max_corrected_score
+mean_max_readout_value
+max_readout_value
+readout_finite_fraction
+```
+
+If overflow appears, do not silently clip. Use a documented stable variant and record it in
+the config/report.
+
+## Diagnostics
+
+Keep the existing Stage 4B metrics and add/retain fields that make the readout clear:
+
+```text
+readout_mode
+overall accuracy
+per-count recall
+count confusion matrix
+mean predicted count
+mean absolute count error
+mean target readout by true count
+mean normalized target attention mass by true count
+mean/worst target-vs-non-target margin Delta
+c and c * Delta for learned_log
+finite readout fraction
+```
+
+For this ablation, `mean_non_target_readout` should be omitted, left empty, or explicitly set
+to a dummy value only if the implementation needs a dummy input. Do not label a diagnostic
+normalized non-target attention mass as a classifier readout.
+
+## Implementation Plan
+
+### Step 1: Add Target-Only Readout Mode
+
+Update the Stage 4B counting model to support:
+
+```text
+target_numerator_only
+```
+
+Keep `softmax_mass` as the default. Keep `unnormalized_sum` working.
+
+### Step 2: Classifier Dimension
+
+Make the classifier input dimension depend on `readout_mode`:
+
+```text
+softmax_mass:          H + 1
+unnormalized_sum:      H + 1
+target_numerator_only: 1
+```
+
+For this task, it is acceptable to restrict `target_numerator_only` to `target_token_count=1`
+and raise a clear error for `H > 1`.
+
+### Step 3: Evaluation And CSVs
+
+Thread `readout_mode` through config, CLI, model checkpoint metadata, metrics CSVs, count
+metrics, and confusion outputs.
+
+Make sure chunked evaluation still matches single-chunk evaluation.
+
+### Step 4: Tests
+
+Add or update tests under `infinite_generalization/tests/`:
+
+1. Existing `softmax_mass` and `unnormalized_sum` tests still pass.
+2. `target_numerator_only` output has shape `(batch, 1)`.
+3. For identical target scores, the target-only readout is proportional to true count.
+4. The classifier output dimension remains `K + 1`.
+5. Chunked evaluation matches single-chunk evaluation for `target_numerator_only`.
+6. A tiny config runs end to end for `target_numerator_only`.
+
+### Step 5: Smoke Runs
+
+Run tiny smoke configurations for:
+
+```text
+constant
+log
+learned_log
+```
+
+with:
+
+```text
+readout_mode = target_numerator_only
+```
+
+### Step 6: Main Runs
+
+Run the same base Stage 4B setting:
+
+```text
+target_token_count     = 1
+non_target_token_count = 1
+max_target_count       = 3
+target_position_mode   = fixed_start
+train_length           = 10
+eval_sampling_mode     = stratified
+eval_lengths           = 10 ... 10000000
+```
+
+Use a separate output directory:
+
+```text
+runs/stage4b/ablation2_target_only/
+```
+
+Recommended run names:
+
+```text
+constant_e500_t1_nt1_k3
+log_e500_t1_nt1_k3
+learned_log_e500_t1_nt1_k3
+```
+
+If e500 is undertrained, add a longer run without overwriting e500.
+
+## Analysis Questions
+
+After the runs complete, answer:
+
+```text
+Does target_numerator_only fit the training length?
+Does it avoid count-0 collapse at 10M?
+Does constant scaling now extrapolate, since target numerator is length-stable when scores are fixed?
+Do log and learned_log introduce target-readout scale drift even without non-target readout?
+Is the count signal truly represented by target numerator magnitude?
+How should this diagnostic be interpreted relative to the more natural target/non-target readouts?
+```
+
+## Done Criteria
+
+This task is complete when:
+
+1. `readout_mode=target_numerator_only` is implemented without breaking `softmax_mass` or
+   `unnormalized_sum`.
+2. Tests cover the new readout mode.
+3. Smoke runs pass for all three alpha modes.
+4. Main target-only ablation runs complete under `runs/stage4b/ablation2_target_only/`.
+5. The Stage 4B report is updated with a clearly labeled diagnostic interpretation.
+
+## Out Of Scope
+
+- Treating target-only readout as the final proposed architecture.
+- Denominator or log-denominator features.
+- Normalized non-target readout variants.
+- Parallel detector plus sum pooling.
+- Multi-length training.
+- Multi-target-type counting.
+
+<!-- Previous completed Ablation 1 task retained below for reference only.
+
 # Task: Stage 4B Ablation 1 - Unnormalized Attention Sum
 
 ## Objective
