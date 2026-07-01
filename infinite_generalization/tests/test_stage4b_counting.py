@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from collections import Counter
+import math
 from pathlib import Path
 from typing import Any
 
@@ -37,9 +38,21 @@ def _without_metadata(
     """Drop run metadata that is expected to differ across equivalent eval paths."""
 
     return [
-        {key: value for key, value in row.items() if key not in metadata_keys}
+        {
+            key: _normalize_for_comparison(value)
+            for key, value in row.items()
+            if key not in metadata_keys
+        }
         for row in rows
     ]
+
+
+def _normalize_for_comparison(value: Any) -> Any:
+    """Normalize NaN values because NaN is intentionally not self-equal."""
+
+    if isinstance(value, float) and math.isnan(value):
+        return "nan"
+    return value
 
 
 class Stage4BDataTest(unittest.TestCase):
@@ -121,13 +134,26 @@ class Stage4BModelTest(unittest.TestCase):
             target_token_count=1,
             non_target_token_count=1,
             max_target_count=max_target_count,
-            readout_mode="unnormalized_sum",
+            readout_mode="target_numerator_only",
         )
         tokens = torch.tensor([[0, 1, 1, 1], [1, 1, 1, 1]])
         logits = model(tokens)
 
+        self.assertEqual(model.classifier.in_features, 1)
         self.assertEqual(model.classifier.out_features, max_target_count + 1)
         self.assertEqual(logits.shape, (2, max_target_count + 1))
+
+    def test_target_numerator_only_output_shape_is_single_feature(self) -> None:
+        model = self.make_model(
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="target_numerator_only",
+        )
+        tokens = torch.tensor([[0, 1, 1, 1], [0, 0, 1, 1]])
+        _, details = model(tokens, return_details=True)
+
+        self.assertEqual(details["attention_output"].shape, (2, 1))
 
     def test_unnormalized_sum_matches_exp_corrected_score_sums(self) -> None:
         model = self.make_model(
@@ -177,6 +203,31 @@ class Stage4BModelTest(unittest.TestCase):
         self.assertGreater(target_readout[1].item(), target_readout[0].item())
         self.assertGreater(target_readout[2].item(), target_readout[1].item())
 
+    def test_target_numerator_only_readout_is_proportional_to_true_count(self) -> None:
+        model = self.make_model(
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="target_numerator_only",
+        )
+        tokens = torch.tensor(
+            [
+                [0, 1, 1, 1],
+                [0, 0, 1, 1],
+                [0, 0, 0, 1],
+            ]
+        )
+        _, details = model(tokens, return_details=True)
+        target_readout = details["attention_output"][:, 0]
+
+        self.assertTrue(
+            torch.allclose(
+                target_readout,
+                target_readout[0] * torch.tensor([1.0, 2.0, 3.0]),
+                atol=1e-6,
+            )
+        )
+
 
 class Stage4BEvalTest(unittest.TestCase):
     """Validate Stage 4B evaluation and chunking."""
@@ -185,13 +236,14 @@ class Stage4BEvalTest(unittest.TestCase):
         self,
         *,
         readout_mode: str = "softmax_mass",
+        target_token_count: int = 2,
     ) -> SimplifiedLastQueryAttentionCounter:
         torch.manual_seed(7)
         return SimplifiedLastQueryAttentionCounter(
             d_head=2,
             alpha_mode="learned_log",
             alpha_log_scale_init=-5.0,
-            target_token_count=2,
+            target_token_count=target_token_count,
             non_target_token_count=1,
             max_target_count=3,
             readout_mode=readout_mode,
@@ -203,9 +255,13 @@ class Stage4BEvalTest(unittest.TestCase):
         examples: int,
         eval_chunk_examples: int,
         readout_mode: str = "softmax_mass",
+        target_token_count: int = 2,
     ):
         return evaluate_length(
-            self.make_model(readout_mode=readout_mode),
+            self.make_model(
+                readout_mode=readout_mode,
+                target_token_count=target_token_count,
+            ),
             length=10,
             examples=examples,
             eval_chunk_examples=eval_chunk_examples,
@@ -213,7 +269,7 @@ class Stage4BEvalTest(unittest.TestCase):
             batch_size=5,
             seed=789,
             target_position_mode="nonfinal_random",
-            target_token_count=2,
+            target_token_count=target_token_count,
             non_target_token_count=1,
             non_target_sampling="uniform",
             max_target_count=3,
@@ -238,6 +294,21 @@ class Stage4BEvalTest(unittest.TestCase):
         )
         self.assert_evaluations_match(single, chunked)
 
+    def test_target_only_chunked_evaluation_matches_single_chunk_evaluation(self) -> None:
+        single = self.evaluate(
+            examples=24,
+            eval_chunk_examples=24,
+            readout_mode="target_numerator_only",
+            target_token_count=1,
+        )
+        chunked = self.evaluate(
+            examples=24,
+            eval_chunk_examples=5,
+            readout_mode="target_numerator_only",
+            target_token_count=1,
+        )
+        self.assert_evaluations_match(single, chunked)
+
     def assert_evaluations_match(self, single, chunked) -> None:
         """Assert equal evaluation outputs except chunk-size metadata."""
 
@@ -252,6 +323,8 @@ class Stage4BEvalTest(unittest.TestCase):
                 continue
             chunked_value = chunked_metrics[0][key]
             if isinstance(single_value, float):
+                if math.isnan(single_value) and math.isnan(chunked_value):
+                    continue
                 self.assertAlmostEqual(single_value, chunked_value, places=6, msg=key)
             else:
                 self.assertEqual(single_value, chunked_value, key)
@@ -376,6 +449,65 @@ class Stage4BDefaultRunTest(unittest.TestCase):
         )
 
         self.assertEqual(metric_rows[0]["readout_mode"], "unnormalized_sum")
+        self.assertEqual(len(count_rows), config.max_target_count + 1)
+        self.assertEqual(
+            len(confusion_rows),
+            (config.max_target_count + 1) * (config.max_target_count + 1),
+        )
+        self.assertEqual(len(target_type_rows), config.target_token_count)
+        self.assertTrue(0.0 <= metric_rows[0]["accuracy"] <= 1.0)
+
+    def test_tiny_train_and_eval_runs_for_target_numerator_only(self) -> None:
+        base_output_dir = ROOT / "runs" / "_test_stage4b_counting"
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = base_output_dir / "target_numerator_only"
+        output_dir.mkdir(exist_ok=True)
+        config = Stage4BConfig(
+            seed=44,
+            device="cpu",
+            output_dir=str(output_dir),
+            alpha_mode="constant",
+            readout_mode="target_numerator_only",
+            train_length=8,
+            target_position_mode="nonfinal_random",
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=2,
+            train_examples=24,
+            val_examples=12,
+            test_examples=12,
+            eval_chunk_examples=5,
+            eval_sampling_mode="stratified",
+            eval_lengths=(8, 12),
+            batch_size=8,
+            eval_batch_size=4,
+            epochs=1,
+            max_train_steps=2,
+        )
+
+        model, updates = train_model(
+            config,
+            device=torch.device("cpu"),
+            output_dir=output_dir,
+        )
+        self.assertGreater(updates, 0)
+        metric_rows, count_rows, confusion_rows, target_type_rows = evaluate_length(
+            model,
+            length=12,
+            examples=config.test_examples,
+            eval_chunk_examples=config.eval_chunk_examples,
+            eval_sampling_mode=config.eval_sampling_mode,
+            batch_size=config.eval_batch_size,
+            seed=config.seed + 10_000 + 12,
+            target_position_mode=config.target_position_mode,
+            target_token_count=config.target_token_count,
+            non_target_token_count=config.non_target_token_count,
+            non_target_sampling=config.non_target_sampling,
+            max_target_count=config.max_target_count,
+            device=torch.device("cpu"),
+        )
+
+        self.assertEqual(metric_rows[0]["readout_mode"], "target_numerator_only")
         self.assertEqual(len(count_rows), config.max_target_count + 1)
         self.assertEqual(
             len(confusion_rows),

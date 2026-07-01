@@ -422,7 +422,7 @@ def iter_count_eval_batches(
 class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier):
     """Reduced last-query attention model with a count-class readout."""
 
-    READOUT_MODES = {"softmax_mass", "unnormalized_sum"}
+    READOUT_MODES = {"softmax_mass", "unnormalized_sum", "target_numerator_only"}
 
     def __init__(
         self,
@@ -446,9 +446,11 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
             raise ValueError("max_target_count must be at least 1.")
         if readout_mode not in self.READOUT_MODES:
             raise ValueError(f"Unsupported readout_mode: {readout_mode}")
+        if readout_mode == "target_numerator_only" and target_token_count != 1:
+            raise ValueError("target_numerator_only currently requires target_token_count=1.")
         self.max_target_count = max_target_count
         self.readout_mode = readout_mode
-        self.value_dim = target_token_count + 1
+        self.value_dim = 1 if readout_mode == "target_numerator_only" else target_token_count + 1
         self.num_count_classes = max_target_count + 1
         self.classifier = nn.Linear(self.value_dim, self.num_count_classes)
 
@@ -487,6 +489,20 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
         ).sum(dim=1)
         return torch.stack(sums + [non_target_sum], dim=1)
 
+    def target_numerator_only_output(
+        self,
+        tokens: torch.Tensor,
+        corrected_scores: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return only the single-target numerator sum used by Ablation 2."""
+
+        numerator_values = torch.exp(corrected_scores)
+        target_sum = numerator_values.masked_fill(
+            tokens.ne(0),
+            0.0,
+        ).sum(dim=1)
+        return target_sum.unsqueeze(1)
+
     def readout_value_output(
         self,
         tokens: torch.Tensor,
@@ -497,6 +513,8 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
 
         if self.readout_mode == "softmax_mass":
             return self.token_value_output(tokens, attention_weights)
+        if self.readout_mode == "target_numerator_only":
+            return self.target_numerator_only_output(tokens, corrected_scores)
         return self.unnormalized_value_output(tokens, corrected_scores)
 
     def forward(
@@ -551,7 +569,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--readout-mode",
-        choices=("softmax_mass", "unnormalized_sum"),
+        choices=("softmax_mass", "unnormalized_sum", "target_numerator_only"),
         default=Stage4BConfig.readout_mode,
     )
     parser.add_argument("--train-length", type=int, default=Stage4BConfig.train_length)
@@ -804,8 +822,12 @@ def evaluate_length(
         preds = logits.argmax(dim=1)
         readout_output = details["attention_output"]
         normalized_attention_output = details["normalized_attention_output"]
-        target_readout = readout_output[:, :target_token_count].sum(dim=1)
-        non_target_readout = readout_output[:, target_token_count]
+        if model.readout_mode == "target_numerator_only":
+            target_readout = readout_output[:, 0]
+            non_target_readout = torch.full_like(target_readout, float("nan"))
+        else:
+            target_readout = readout_output[:, :target_token_count].sum(dim=1)
+            non_target_readout = readout_output[:, target_token_count]
         target_attention_mass = normalized_attention_output[:, :target_token_count].sum(dim=1)
         non_target_attention_mass = normalized_attention_output[:, target_token_count]
 
