@@ -416,6 +416,105 @@ background scale that the classifier learns at the training length and cannot ex
 through. The failure shifts from "normalized target mass loses count scale" to "unnormalized
 background scale overwhelms the count signal."
 
+## Ablation 2: Target Numerator Only
+
+The second follow-up ablation removed the length-growing non-target numerator from the
+classifier input and exposed only the target numerator:
+
+```math
+u_t =
+\sum_{j:\,x_j=t} e^{\alpha s_j}.
+```
+
+In the base $H = 1$ setting, the classifier receives a single scalar:
+
+```text
+[target numerator sum]
+```
+
+This is a diagnostic upper-bound style ablation. It is not a natural replacement for the
+strict reduced-attention readout, because the classifier is no longer given any non-target
+readout. The purpose is to isolate whether the target numerator itself contains a stable count
+signal once the length-growing non-target background is removed.
+
+The ablation outputs are under:
+
+```text
+runs/stage4b/ablation2_target_only/
+```
+
+All three e500 runs fit the training length:
+
+| Run | Train acc | Val acc | Train loss | Accuracy @ 10M | MAE @ 10M |
+|---|---:|---:|---:|---:|---:|
+| `constant_e500_t1_nt1_k3` | 1.000 | 1.000 | 0.00515 | 1.000 | 0.000 |
+| `log_e500_t1_nt1_k3` | 1.000 | 1.000 | 0.00539 | 0.500 | 0.750 |
+| `learned_log_e500_t1_nt1_k3` | 1.000 | 1.000 | 0.00518 | 0.500 | 0.500 |
+
+The constant run succeeds completely at 10M:
+
+| Run | True count 0 | True count 1 | True count 2 | True count 3 |
+|---|---|---|---|---|
+| `constant_e500_t1_nt1_k3` | pred 0 | pred 1 | pred 2 | pred 3 |
+| `log_e500_t1_nt1_k3` | pred 0 | pred 3 | pred 3 | pred 3 |
+| `learned_log_e500_t1_nt1_k3` | pred 0 | pred 2 | pred 3 | pred 3 |
+
+The reason is that, under constant scaling, the target-only readout is length-invariant. For a
+true count $k$,
+
+```math
+u_t(k,n) = k e^{s_t}.
+```
+
+Since $e^{s_t}$ is fixed across lengths, the readout remains a stable linear count signal. At
+10M, the constant run preserves the same count spacing:
+
+| True count | Mean target readout @ 10M |
+|---:|---:|
+| 0 | 0.00 |
+| 1 | 17.23 |
+| 2 | 34.46 |
+| 3 | 51.68 |
+
+This is enough for the one-dimensional classifier to keep the same decision regions learned at
+the training length. The normalized target attention mass still dilutes toward zero, but that
+mass is no longer the classifier input in this ablation.
+
+The fixed-log and learned-log runs fail for the opposite reason. Once the readout is
+unnormalized, the length-aware multiplier changes the absolute target numerator scale:
+
+```math
+u_t(k,n) = k e^{\alpha(n) s_t}.
+```
+
+For fixed-log scaling, $\alpha(n)=\log n$, so if the learned target score $s_t$ is positive,
+
+```math
+u_t(k,n) = k n^{s_t}.
+```
+
+The target readout therefore grows with length. At 10M, this pushes smaller positive counts
+past the classifier's training-length thresholds:
+
+| Run | Count 1 target readout @ 10M | Count 2 target readout @ 10M | Count 3 target readout @ 10M |
+|---|---:|---:|---:|
+| `constant_e500_t1_nt1_k3` | 17.23 | 34.46 | 51.68 |
+| `log_e500_t1_nt1_k3` | 1.21e9 | 2.42e9 | 3.63e9 |
+| `learned_log_e500_t1_nt1_k3` | 39.50 | 79.00 | 118.50 |
+
+Thus Ablation 2 separates two failure modes. Ablation 1 showed that the target numerator
+preserves count information, but the non-target numerator creates a length-growing background
+feature. Ablation 2 removes that background and confirms that the constant target numerator is
+indeed a stable count signal. However, it also shows that unnormalized target numerators are
+sensitive to absolute score-scale drift under length-aware multipliers. Fixed-log and
+learned-log no longer collapse to count 0; instead, they overestimate positive counts because
+the target numerator grows beyond the range seen during training.
+
+The recorded `readout_finite_fraction` was `1.000` for all three runs, so this is not a
+numerical overflow artifact. It is a representation issue: target-only unnormalized count
+readout works when its per-target scale is length-invariant, but it is not automatically stable
+under length-dependent score scaling.
+
 ## Current Conclusion
 
 **The strict Stage 4B normalized-attention baseline fails exact count length generalization.**
