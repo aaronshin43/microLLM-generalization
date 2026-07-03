@@ -1,3 +1,478 @@
+# Task: Stage 4B Ablation 3 - Top-K Restricted Softmax
+
+## Objective
+
+Stage 4B showed that the strict normalized softmax-attention counting baseline can fit the
+training length but fails to length-generalize exact counts. The full softmax denominator grows
+with the number of non-target positions, so the target count signal becomes length-dependent.
+
+Ablation 1 removed the softmax denominator entirely, but the unnormalized non-target numerator
+became a length-growing background feature. Ablation 2 removed the non-target numerator and
+showed that a constant target numerator can preserve count, but the diagnostic is not a natural
+attention readout and length-aware multipliers can still introduce target-scale drift.
+
+This task tests the next more attention-like intervention:
+
+```text
+Ablation 3: select top-k positions by corrected score, then compute a softmax only over that
+selected subset.
+```
+
+The central question is:
+
+**If the attention denominator is restricted to a fixed-size top-k subset, can the reduced
+Stage 4B model preserve count information across length without using an unnormalized readout?**
+
+This should be implemented as a corrected-score top-k subset softmax, not as a post-hoc
+full-softmax truncation. The two are mathematically equivalent when the selected set is the
+same, but selecting from corrected scores is cleaner and avoids making the full-sequence
+softmax denominator part of the readout definition.
+
+## Background
+
+The strict Stage 4B baseline uses full softmax target mass. For one target type, true count
+$k$, target score $a$, non-target score $b$, and margin $\Delta=a-b$:
+
+```math
+m_k(n)
+=
+\frac{k e^{\alpha a}}{k e^{\alpha a} + (n-k)e^{\alpha b}}
+=
+\frac{k e^{\alpha\Delta}}{k e^{\alpha\Delta} + (n-k)}.
+```
+
+The failure comes from the $(n-k)$ term. The count $k$ is bounded by `max_target_count`, but
+$n$ grows to 10M.
+
+For top-k restricted softmax, use $R$ for the fixed top-k size to avoid confusing it with the
+maximum count class $K$. Let the corrected score be:
+
+```math
+r_j = \alpha(n) s_j.
+```
+
+Select the top-$R$ index set by corrected score:
+
+```math
+J_R(x)
+=
+\operatorname{TopR}\{r_0,r_1,\dots,r_{n-1}\}.
+```
+
+Then compute attention only inside that subset:
+
+```math
+\tilde a_j
+=
+\frac{e^{r_j}}{\sum_{\ell\in J_R(x)} e^{r_\ell}}
+\quad\text{for }j\in J_R(x),
+\qquad
+\tilde a_j = 0 \quad\text{otherwise}.
+```
+
+The value readout uses this restricted attention distribution:
+
+```math
+z =
+\sum_{j\in J_R(x)} \tilde a_j v_j.
+```
+
+In the idealized Stage 4B setting, if $k \le R$ and all target positions rank above the
+non-target positions needed to fill the top-$R$ set, then the target mass becomes:
+
+```math
+m_k^{\text{top-}R}
+=
+\frac{k e^{\alpha a}}{k e^{\alpha a} + (R-k)e^{\alpha b}}
+=
+\frac{k e^{\alpha\Delta}}{k e^{\alpha\Delta} + (R-k)}.
+```
+
+The key change is:
+
+```text
+full softmax:       denominator has (n-k)
+top-k softmax:      denominator has (R-k)
+```
+
+Because $R$ is fixed, the denominator no longer grows with sequence length. However, this does
+not guarantee exact counting. The top-k mechanism can fail in two different ways:
+
+```text
+ranking failure:
+    target tokens do not enter the top-k subset
+
+readout failure:
+    target tokens enter the top-k subset, but the restricted mass saturates or otherwise
+    fails to separate count classes
+```
+
+This ablation should therefore record explicit top-k selection diagnostics, not only final
+count accuracy.
+
+## Scope
+
+Implement and run only the corrected-score top-k restricted softmax readout.
+
+Do not implement these variants yet:
+
+- full-softmax truncation as the primary implementation,
+- learned or adaptive `top_k`,
+- denominator or log-denominator features,
+- parallel detector plus sum pooling,
+- multi-length training,
+- multi-target-type counting.
+
+## Baselines To Compare Against
+
+Strict Stage 4B baseline:
+
+```text
+documents/STAGE4B_COUNTING_TARGET_OCCURRENCES.md
+runs/stage4b/
+```
+
+Ablation 1:
+
+```text
+runs/stage4b/ablation1_unnormalized/
+```
+
+Ablation 2:
+
+```text
+runs/stage4b/ablation2_target_only/
+```
+
+Key comparison:
+
+```text
+strict softmax_mass baseline:
+    denominator includes all n positions
+    positive counts collapse to count 0 at 10M
+
+ablation1 unnormalized_sum:
+    target numerator preserves count
+    non-target numerator grows with length
+    10M accuracy = 0.250
+
+ablation2 target_numerator_only:
+    constant target numerator succeeds
+    log and learned_log overestimate counts because target scale drifts upward
+
+ablation3 topk_softmax_mass:
+    denominator includes only fixed top_k positions
+    test whether this preserves a bounded, attention-like count signal
+```
+
+## Model Change
+
+Keep the Stage 4B dataset, labels, loss, multiplier modes, and chunked evaluation unchanged.
+
+Add another readout mode, for example:
+
+```text
+readout_mode = softmax_mass | unnormalized_sum | target_numerator_only | topk_softmax_mass
+```
+
+Add a config/CLI field for the restricted attention size:
+
+```text
+top_k = 3
+```
+
+Use the name `top_k` in configs and CSVs, but use $R$ in document math when needed to avoid
+confusion with `max_target_count`.
+
+The existing modes must remain reproducible:
+
+```text
+softmax_mass:
+    value_output = [full-softmax target mass(es), full-softmax non-target mass]
+
+unnormalized_sum:
+    value_output = [target numerator sum(s), non-target numerator sum]
+
+target_numerator_only:
+    value_output = [target numerator sum]
+```
+
+Ablation 3 should use:
+
+```text
+topk_softmax_mass:
+    select top_k indices by corrected score
+    compute softmax only over those selected corrected scores
+    value_output = [top-k target mass(es), top-k non-target mass]
+```
+
+For the current base setting $H = 1$:
+
+```math
+m_t^{\text{top-}R}
+=
+\sum_{j\in J_R(x):\,x_j=t}
+\frac{e^{r_j}}{\sum_{\ell\in J_R(x)} e^{r_\ell}},
+\qquad
+m_{\text{non}}^{\text{top-}R}
+=
+1 - m_t^{\text{top-}R}.
+```
+
+The classifier remains:
+
+```text
+classifier = Linear(H + 1, K + 1)
+loss       = cross-entropy over count classes
+```
+
+For now, this ablation only needs to support the base Stage 4B setting:
+
+```text
+target_token_count     = 1
+non_target_token_count = 1
+max_target_count       = 3
+```
+
+The main run should use `top_k = 3`, matching `max_target_count`. If the primary result is
+ambiguous, add sensitivity checks with `top_k = 4` and `top_k = 6` without overwriting the
+primary runs.
+
+## Numerical Handling
+
+The top-k readout should be computed from corrected scores:
+
+```text
+corrected_scores = alpha(length) * raw_scores
+top_values, top_indices = topk(corrected_scores, k=top_k)
+top_weights = softmax(top_values)
+```
+
+Do not compute the top-k readout by first applying full softmax over all $n$ positions and
+then truncating the resulting weights. That form is mathematically equivalent after
+renormalization in exact arithmetic, but it obscures the intended denominator and can add
+unnecessary numerical and memory pressure.
+
+Use a numerically stable subset softmax. Keep existing finite-value diagnostics:
+
+```text
+mean_max_corrected_score
+max_corrected_score
+mean_max_readout_value
+max_readout_value
+readout_finite_fraction
+```
+
+If `top_k > length`, use `min(top_k, length)` and record the effective value, or raise a clear
+error. For the planned runs, `top_k <= train_length` and this should not occur.
+
+## Diagnostics
+
+Keep the existing Stage 4B metrics and add/retain fields that make the top-k behavior clear:
+
+```text
+readout_mode
+top_k
+effective_top_k
+overall accuracy
+per-count recall
+count confusion matrix
+mean predicted count
+mean absolute count error
+mean top-k target mass by true count
+mean top-k non-target mass by true count
+mean full-softmax target attention mass by true count, if still available
+mean/worst target-vs-non-target margin Delta
+c and c * Delta for learned_log
+finite readout fraction
+```
+
+Add top-k selection diagnostics:
+
+```text
+mean_topk_target_count
+mean_topk_target_recall
+mean_topk_all_targets_included
+mean_topk_non_target_count
+```
+
+Definitions:
+
+```text
+topk_target_count:
+    number of true target positions selected into the top-k set
+
+topk_target_recall:
+    topk_target_count / true_count for true_count > 0
+    leave empty, NaN, or define separately for true_count = 0
+
+topk_all_targets_included:
+    1 if topk_target_count == true_count, else 0
+
+topk_non_target_count:
+    number of selected non-target positions
+```
+
+These diagnostics are necessary to distinguish ranking failure from readout failure.
+
+## Implementation Plan
+
+### Step 1: Add Top-K Softmax Readout Mode
+
+Update the Stage 4B counting model to support:
+
+```text
+topk_softmax_mass
+```
+
+Keep `softmax_mass` as the default. Keep `unnormalized_sum` and `target_numerator_only`
+working.
+
+### Step 2: Add `top_k`
+
+Thread `top_k` through:
+
+```text
+config dataclass
+CLI
+saved config JSON
+model checkpoint metadata
+metrics CSVs
+count metrics
+confusion outputs
+```
+
+The value should be ignored by non-top-k modes except for being saved as metadata if that is
+simpler.
+
+### Step 3: Implement Subset Softmax
+
+Implement the readout from corrected scores:
+
+```text
+1. Select top_k positions by corrected score.
+2. Apply softmax to only the selected corrected scores.
+3. Aggregate selected weights by token type.
+4. Feed [top-k target mass(es), top-k non-target mass] to the classifier.
+```
+
+For ties, use the deterministic behavior of the underlying `topk` implementation. The report
+should mention that ties are not expected to matter in the learned-score regime.
+
+### Step 4: Evaluation And CSVs
+
+Add the top-k diagnostics listed above. Make sure chunked evaluation still matches
+single-chunk evaluation.
+
+The existing full-softmax diagnostics may remain for comparison, but the classifier readout
+must be the top-k restricted softmax mass.
+
+### Step 5: Tests
+
+Add or update tests under `infinite_generalization/tests/`:
+
+1. Existing `softmax_mass`, `unnormalized_sum`, and `target_numerator_only` tests still pass.
+2. `topk_softmax_mass` output has shape `(batch, H + 1)`.
+3. The top-k readout is computed from corrected scores and assigns zero mass to positions
+   outside the selected subset.
+4. For a small hand-constructed example, subset-softmax mass matches renormalized full-softmax
+   mass over the same selected top-k indices.
+5. With `top_k = max_target_count` and targets ranked highest, all target positions are
+   included for counts up to `max_target_count`.
+6. Top-k diagnostics report ranking success and ranking failure correctly.
+7. Chunked evaluation matches single-chunk evaluation for `topk_softmax_mass`.
+8. A tiny config runs end to end for `topk_softmax_mass`.
+
+### Step 6: Smoke Runs
+
+Run tiny smoke configurations for:
+
+```text
+constant
+log
+learned_log
+```
+
+with:
+
+```text
+readout_mode = topk_softmax_mass
+top_k = 3
+```
+
+Use a separate smoke output directory:
+
+```text
+runs/stage4b/ablation3_topk_smoke/
+```
+
+### Step 7: Main Runs
+
+Run the same base Stage 4B setting:
+
+```text
+target_token_count     = 1
+non_target_token_count = 1
+max_target_count       = 3
+target_position_mode   = fixed_start
+train_length           = 10
+eval_sampling_mode     = stratified
+eval_lengths           = 10 ... 10000000
+top_k                  = 3
+```
+
+Use a separate output directory:
+
+```text
+runs/stage4b/ablation3_topk/
+```
+
+Recommended run names:
+
+```text
+constant_e500_topk3_t1_nt1_k3
+log_e500_topk3_t1_nt1_k3
+learned_log_e500_topk3_t1_nt1_k3
+```
+
+If e500 is undertrained, add longer runs without overwriting e500.
+
+## Analysis Questions
+
+After the runs complete, answer:
+
+```text
+Does topk_softmax_mass fit the training length?
+Does it avoid count-0 collapse at 10M?
+Are all true target positions selected into the top-k subset at long length?
+If a run fails, is it a ranking failure or a readout failure?
+Does constant scaling preserve count-sensitive restricted mass?
+Do log and learned_log saturate positive counts once the denominator is fixed?
+Is top_k = 3 enough, or do top_k = 4 or top_k = 6 sensitivity checks change the result?
+How should this diagnostic be interpreted relative to the strict full-softmax baseline?
+```
+
+## Done Criteria
+
+This task is complete when:
+
+1. `readout_mode=topk_softmax_mass` is implemented without breaking existing readout modes.
+2. `top_k` is threaded through config, CLI, checkpoints, and CSV outputs.
+3. Tests cover the new readout path and top-k diagnostics.
+4. Smoke runs pass for all three alpha modes.
+5. Main top-k ablation runs complete under `runs/stage4b/ablation3_topk/`.
+6. The Stage 4B report is updated with a clearly labeled diagnostic interpretation.
+
+## Out Of Scope
+
+- Treating top-k restricted softmax as the final proposed architecture.
+- Learned or adaptive top-k selection.
+- Multi-length training.
+- Multi-target-type counting.
+- Full-transformer Stage 1/2 changes.
+
+<!-- Previous completed Ablation 2 task retained below for reference only.
+
 # Task: Stage 4B Ablation 2 - Target Numerator Only
 
 ## Objective
@@ -325,6 +800,8 @@ This task is complete when:
 - Parallel detector plus sum pooling.
 - Multi-length training.
 - Multi-target-type counting.
+
+-->
 
 <!-- Previous completed Ablation 1 task retained below for reference only.
 
