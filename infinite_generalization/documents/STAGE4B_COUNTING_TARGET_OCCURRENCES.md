@@ -515,6 +515,97 @@ numerical overflow artifact. It is a representation issue: target-only unnormali
 readout works when its per-target scale is length-invariant, but it is not automatically stable
 under length-dependent score scaling.
 
+## Ablation 3: Top-K Restricted Softmax
+
+The third follow-up ablation tested a more attention-like alternative: select a fixed-size
+top-k subset by corrected score, then compute a softmax only over that subset. For the base
+setting, the main runs used:
+
+```text
+readout_mode = topk_softmax_mass
+top_k        = 3
+```
+
+The corrected score is the raw query-key score after applying the same length-aware multiplier
+used by the rest of the Stage 4B model:
+
+```math
+r_j = \alpha(n) s_j,
+```
+
+where $s_j$ is the raw score for position $j$ and $\alpha(n)$ is the configured multiplier
+from `constant`, `log`, or `learned_log`. The top-k subset is selected from these corrected
+scores:
+
+```math
+J_R(x) =
+\operatorname{TopR}\{r_0,r_1,\dots,r_{n-1}\}.
+```
+
+This keeps the ablation aligned with the actual attention logits used by the model. The
+restricted softmax then changes only the denominator set; it does not introduce a separate
+ranking score or a second scoring rule.
+
+The theoretical motivation is to keep the softmax readout but remove the length-growing
+denominator. Let $R$ denote the fixed top-k size. If an example has true count $k \le R$, and
+if all $k$ target positions rank above the non-target positions needed to fill the selected
+set, then the top-k restricted target mass is:
+
+```math
+m_k^{\text{top-}R}
+=
+\frac{k e^{\alpha\Delta}}{k e^{\alpha\Delta} + (R-k)}.
+```
+
+This is the same form as the full-softmax mass, except the denominator contains $(R-k)$
+instead of $(n-k)$. Since $R$ is fixed, the count signal should no longer dilute simply because
+the evaluation sequence is longer. In the ideal case with `top_k = 3`, counts 0, 1, 2, and 3
+would be represented by a bounded subset-level attention statistic rather than by a mass
+normalized over all $n$ positions.
+
+This theory depends on a ranking condition. The method can only preserve count if the true
+target positions enter the selected subset. Therefore top-k restricted softmax has two
+separate possible failure modes:
+
+```text
+ranking failure:
+    target positions do not enter the top-k subset
+
+readout failure:
+    target positions enter the subset, but the restricted masses do not separate count classes
+```
+
+The intended benefit is therefore conditional: if the ranking is correct, the denominator no
+longer grows with sequence length; if the ranking is wrong, the attention readout may never see
+the target positions at all.
+
+The primary seed-42 runs and follow-up seed-43/44 checks all failed:
+
+| Seeds | Modes | Accuracy @ train length | Accuracy @ 10M | Mean top-k target count | Mean top-k non-target count |
+|---|---|---:|---:|---:|---:|
+| 42, 43, 44 | `constant`, `log`, `learned_log` | 0.250 | 0.250 | 0.0 | 3.0 |
+
+The exact constant prediction differed by seed. Seed 42 predicted count 0 for every example,
+while seeds 43 and 44 predicted count 2 for every example. This difference is not the main
+failure mode. In every run, the selected top-k subset contained only non-target tokens, so the
+classifier saw the same readout for every input:
+
+```text
+[top-k target mass, top-k non-target mass] = [0, 1]
+```
+
+This is a ranking failure, not a readout-calibration failure. The learned target-vs-non-target
+margin $\Delta$ was negative in all top-k runs, so target positions ranked below non-target positions
+and never entered the selected subset. The hard top-k operation creates a cold-start problem.
+Once target tokens are outside the selected subset, the target readout is exactly zero, and the
+model receives little or no useful gradient signal to raise target scores into the top-k set.
+
+This ablation therefore does not show that a top-k denominator is impossible in principle. It
+shows that hard top-k selection is not trainable from this cold start in the current reduced
+model. A fairer test would likely need a differentiable warm-up path, such as full-softmax
+pretraining followed by top-k fine-tuning, a ranking auxiliary loss, or a soft top-k relaxation
+before switching to hard top-k.
+
 ## Current Conclusion
 
 **The strict Stage 4B normalized-attention baseline fails exact count length generalization.**
@@ -534,7 +625,9 @@ The failure mode is positive-to-zero collapse:
 More importantly, Stage 4B suggests that exact counting is not solved by simply making the
 Stage 3/4A target-presence mechanism stronger. Counting needs either a calibrated critical
 regime or a representation that preserves count-like information more directly without also
-introducing an uncontrolled length-growing background scale.
+introducing an uncontrolled length-growing background scale. The top-k ablation also shows
+that bounding the denominator is not enough if the model cannot first learn the correct
+target-over-non-target ranking.
 
 ## Limitations And Next Steps
 
@@ -550,17 +643,20 @@ Longer training reduces training loss but does not change the long-length failur
 longer lengths or multiple lengths may improve finite-length behavior, but it does not remove
 the underlying asymptotic tension of representing count through normalized mass.
 
-The first ablation has now tested the full unnormalized numerator readout
-`[target numerator, non-target numerator]`. It showed that the target numerator preserves
-count scale, but the non-target numerator creates a length-growing background feature. The
-next useful ablation is therefore more targeted: expose the target numerator while removing or
-controlling the non-target numerator.
+The follow-up ablations now separate several mechanisms:
+
+- the full unnormalized readout shows that target numerator scale can preserve count, but the
+  non-target numerator creates a length-growing background feature,
+- the target-numerator-only readout confirms that the constant target numerator is a stable
+  count signal when isolated from that background,
+- the hard top-k readout fails by cold-start ranking failure because target tokens never enter
+  the selected subset.
 
 Minimal candidates are:
 
-- use a target-numerator-only readout,
 - add denominator or log-denominator information to explicitly normalize the length-growing
   background,
+- warm-start top-k from a full-softmax checkpoint or add an explicit ranking loss,
 - compare against a parallel detector followed by sum pooling.
 
 Those variants should be treated as diagnostic ablations, not as replacements for the main
