@@ -41,6 +41,8 @@ class Stage4BConfig:
     alpha_mode: str = "constant"
     readout_mode: str = "softmax_mass"
     top_k: int = 3
+    warm_start_checkpoint: str = ""
+    warm_start_mode: str = "none"
     train_length: int = 10
     train_lengths: tuple[int, ...] = ()
     target_position_mode: str = "fixed_start"
@@ -460,6 +462,8 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
         self.max_target_count = max_target_count
         self.readout_mode = readout_mode
         self.top_k = top_k
+        self.warm_start_checkpoint = ""
+        self.warm_start_mode = "none"
         self.value_dim = 1 if readout_mode == "target_numerator_only" else target_token_count + 1
         self.num_count_classes = max_target_count + 1
         self.classifier = nn.Linear(self.value_dim, self.num_count_classes)
@@ -633,6 +637,16 @@ def parse_args() -> argparse.Namespace:
         default=Stage4BConfig.readout_mode,
     )
     parser.add_argument("--top-k", type=int, default=Stage4BConfig.top_k)
+    parser.add_argument(
+        "--warm-start-checkpoint",
+        type=str,
+        default=Stage4BConfig.warm_start_checkpoint,
+    )
+    parser.add_argument(
+        "--warm-start-mode",
+        choices=("none", "score_only"),
+        default=Stage4BConfig.warm_start_mode,
+    )
     parser.add_argument("--train-length", type=int, default=Stage4BConfig.train_length)
     parser.add_argument("--train-lengths", type=int, nargs="+", default=None)
     parser.add_argument(
@@ -715,6 +729,10 @@ def build_config(args: argparse.Namespace) -> Stage4BConfig:
         raise ValueError("--test-examples must be at least 1.")
     if args.eval_chunk_examples < 1:
         raise ValueError("--eval-chunk-examples must be at least 1.")
+    if args.warm_start_checkpoint and args.warm_start_mode == "none":
+        raise ValueError("--warm-start-mode must be score_only when using a checkpoint.")
+    if args.warm_start_mode == "score_only" and not args.warm_start_checkpoint:
+        raise ValueError("--warm-start-checkpoint is required for score_only warm start.")
 
     common = dict(
         seed=args.seed,
@@ -723,6 +741,8 @@ def build_config(args: argparse.Namespace) -> Stage4BConfig:
         alpha_mode=args.alpha_mode,
         readout_mode=args.readout_mode,
         top_k=args.top_k,
+        warm_start_checkpoint=args.warm_start_checkpoint,
+        warm_start_mode=args.warm_start_mode,
         train_length=args.train_length,
         train_lengths=train_lengths,
         target_position_mode=args.target_position_mode,
@@ -851,6 +871,79 @@ def topk_selection_diagnostics(
             dtype=torch.float32
         ),
     }
+
+
+def _require_checkpoint_field(
+    checkpoint: dict[str, Any],
+    field_name: str,
+    checkpoint_path: Path,
+) -> Any:
+    """Return a checkpoint metadata field or raise a clear error."""
+
+    if field_name not in checkpoint:
+        raise ValueError(f"Warm-start checkpoint {checkpoint_path} is missing {field_name!r}.")
+    return checkpoint[field_name]
+
+
+def _validate_warm_start_checkpoint(
+    checkpoint: dict[str, Any],
+    config: Stage4BConfig,
+    checkpoint_path: Path,
+) -> None:
+    """Validate score-side checkpoint compatibility against the target config."""
+
+    expected_fields = {
+        "target_token_count": config.target_token_count,
+        "non_target_token_count": config.non_target_token_count,
+        "max_target_count": config.max_target_count,
+        "d_head": config.d_head,
+        "alpha_mode": config.alpha_mode,
+    }
+    for field_name, expected_value in expected_fields.items():
+        actual_value = _require_checkpoint_field(checkpoint, field_name, checkpoint_path)
+        if actual_value != expected_value:
+            raise ValueError(
+                f"Warm-start checkpoint {checkpoint_path} has {field_name}={actual_value!r}, "
+                f"but expected {expected_value!r}."
+            )
+    if "state_dict" not in checkpoint:
+        raise ValueError(f"Warm-start checkpoint {checkpoint_path} is missing 'state_dict'.")
+
+
+def apply_score_only_warm_start(
+    model: SimplifiedLastQueryAttentionCounter,
+    config: Stage4BConfig,
+    *,
+    device: torch.device,
+) -> None:
+    """Load query/key projections and learned alpha from a compatible checkpoint."""
+
+    checkpoint_path = resolve_output_path(config.warm_start_checkpoint)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    if not isinstance(checkpoint, dict):
+        raise ValueError(f"Warm-start checkpoint {checkpoint_path} must be a dict.")
+    _validate_warm_start_checkpoint(checkpoint, config, checkpoint_path)
+    state_dict = checkpoint["state_dict"]
+    required_state_keys = (
+        "query_projection.weight",
+        "key_projection.weight",
+        "alpha_log_scale_unconstrained",
+    )
+    missing_keys = [key for key in required_state_keys if key not in state_dict]
+    if missing_keys:
+        missing_text = ", ".join(missing_keys)
+        raise ValueError(
+            f"Warm-start checkpoint {checkpoint_path} is missing state keys: {missing_text}."
+        )
+
+    with torch.no_grad():
+        model.query_projection.weight.copy_(state_dict["query_projection.weight"])
+        model.key_projection.weight.copy_(state_dict["key_projection.weight"])
+        model.alpha_log_scale_unconstrained.copy_(
+            state_dict["alpha_log_scale_unconstrained"]
+        )
+    model.warm_start_checkpoint = config.warm_start_checkpoint
+    model.warm_start_mode = config.warm_start_mode
 
 
 @torch.no_grad()
@@ -1057,6 +1150,8 @@ def evaluate_length(
         "readout_mode": model.readout_mode,
         "top_k": model.top_k,
         "effective_top_k": _mean_or_nan(effective_top_k_cpu),
+        "warm_start_checkpoint": model.warm_start_checkpoint,
+        "warm_start_mode": model.warm_start_mode,
         "target_position_mode": target_position_mode,
         "target_token_count": target_token_count,
         "non_target_token_count": non_target_token_count,
@@ -1110,6 +1205,8 @@ def evaluate_length(
                 "readout_mode": model.readout_mode,
                 "top_k": model.top_k,
                 "effective_top_k": _mean_or_nan(effective_top_k_cpu[mask]),
+                "warm_start_checkpoint": model.warm_start_checkpoint,
+                "warm_start_mode": model.warm_start_mode,
                 "target_position_mode": target_position_mode,
                 "target_token_count": target_token_count,
                 "non_target_token_count": non_target_token_count,
@@ -1157,6 +1254,8 @@ def evaluate_length(
                     "readout_mode": model.readout_mode,
                     "top_k": model.top_k,
                     "effective_top_k": _mean_or_nan(effective_top_k_cpu[true_mask]),
+                    "warm_start_checkpoint": model.warm_start_checkpoint,
+                    "warm_start_mode": model.warm_start_mode,
                     "true_count": true_count,
                     "predicted_count": predicted_count,
                     "examples": cell,
@@ -1177,6 +1276,8 @@ def evaluate_length(
                 "readout_mode": model.readout_mode,
                 "top_k": model.top_k,
                 "effective_top_k": _mean_or_nan(effective_top_k_cpu),
+                "warm_start_checkpoint": model.warm_start_checkpoint,
+                "warm_start_mode": model.warm_start_mode,
                 "target_token_id": token_id,
                 "examples": int(readout.numel()),
                 "present_examples": int(present.sum().item()),
@@ -1232,6 +1333,13 @@ def train_model(
         readout_mode=config.readout_mode,
         top_k=config.top_k,
     ).to(device)
+    if config.warm_start_mode == "score_only":
+        apply_score_only_warm_start(model, config, device=device)
+    elif config.warm_start_mode != "none":
+        raise ValueError(f"Unsupported warm_start_mode: {config.warm_start_mode}")
+    elif config.warm_start_checkpoint:
+        raise ValueError("warm_start_checkpoint requires warm_start_mode='score_only'.")
+
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -1346,6 +1454,8 @@ def main() -> None:
             "alpha_mode": config.alpha_mode,
             "readout_mode": config.readout_mode,
             "top_k": config.top_k,
+            "warm_start_checkpoint": config.warm_start_checkpoint,
+            "warm_start_mode": config.warm_start_mode,
             "alpha_log_scale_init": config.alpha_log_scale_init,
             "target_token_count": config.target_token_count,
             "non_target_token_count": config.non_target_token_count,

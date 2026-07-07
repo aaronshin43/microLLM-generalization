@@ -18,6 +18,7 @@ sys.path.insert(0, str(SRC))
 from stage4b_counting import (  # noqa: E402
     SimplifiedLastQueryAttentionCounter,
     Stage4BConfig,
+    apply_score_only_warm_start,
     count_class_labels,
     evaluate_length,
     make_count_dataset,
@@ -54,6 +55,33 @@ def _normalize_for_comparison(value: Any) -> Any:
     if isinstance(value, float) and math.isnan(value):
         return "nan"
     return value
+
+
+def _write_model_checkpoint(
+    path: Path,
+    model: SimplifiedLastQueryAttentionCounter,
+    *,
+    max_target_count: int,
+    metadata_overrides: dict[str, Any] | None = None,
+) -> None:
+    """Write a minimal Stage 4B checkpoint for warm-start tests."""
+
+    checkpoint = {
+        "state_dict": model.state_dict(),
+        "d_head": model.d_head,
+        "alpha_mode": model.alpha_mode,
+        "readout_mode": model.readout_mode,
+        "top_k": model.top_k,
+        "alpha_log_scale_init": -5.0,
+        "target_token_count": model.target_token_count,
+        "non_target_token_count": model.non_target_token_count,
+        "max_target_count": max_target_count,
+        "num_count_classes": model.num_count_classes,
+        "optimizer_updates": 0,
+    }
+    if metadata_overrides:
+        checkpoint.update(metadata_overrides)
+    torch.save(checkpoint, path)
 
 
 class Stage4BDataTest(unittest.TestCase):
@@ -107,8 +135,9 @@ class Stage4BModelTest(unittest.TestCase):
         alpha_mode: str = "constant",
         readout_mode: str = "softmax_mass",
         top_k: int = 3,
+        seed: int = 0,
     ) -> SimplifiedLastQueryAttentionCounter:
-        torch.manual_seed(0)
+        torch.manual_seed(seed)
         return SimplifiedLastQueryAttentionCounter(
             d_head=2,
             alpha_mode=alpha_mode,
@@ -366,6 +395,91 @@ class Stage4BModelTest(unittest.TestCase):
         self.assertEqual(diagnostics["topk_target_count"].tolist(), [1.0, 2.0, 3.0])
         self.assertEqual(diagnostics["topk_all_targets_included"].tolist(), [1.0, 1.0, 1.0])
 
+    def test_score_only_warm_start_copies_score_parameters_not_classifier(self) -> None:
+        base_output_dir = ROOT / "runs" / "_test_stage4b_counting"
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = base_output_dir / "warm_start_source.pt"
+        source = self.make_model(
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            alpha_mode="learned_log",
+            readout_mode="softmax_mass",
+            seed=11,
+        )
+        target = self.make_model(
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            alpha_mode="learned_log",
+            readout_mode="topk_softmax_mass",
+            seed=22,
+        )
+        classifier_before = target.classifier.weight.detach().clone()
+        _write_model_checkpoint(checkpoint_path, source, max_target_count=3)
+        config = Stage4BConfig(
+            alpha_mode="learned_log",
+            readout_mode="topk_softmax_mass",
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            warm_start_checkpoint=str(checkpoint_path),
+            warm_start_mode="score_only",
+        )
+
+        apply_score_only_warm_start(target, config, device=torch.device("cpu"))
+
+        self.assertTrue(
+            torch.allclose(target.query_projection.weight, source.query_projection.weight)
+        )
+        self.assertTrue(torch.allclose(target.key_projection.weight, source.key_projection.weight))
+        self.assertTrue(
+            torch.allclose(
+                target.alpha_log_scale_unconstrained,
+                source.alpha_log_scale_unconstrained,
+            )
+        )
+        self.assertTrue(torch.allclose(target.classifier.weight, classifier_before))
+        self.assertFalse(torch.allclose(target.classifier.weight, source.classifier.weight))
+        self.assertEqual(target.warm_start_mode, "score_only")
+
+    def test_score_only_warm_start_rejects_mismatched_metadata(self) -> None:
+        base_output_dir = ROOT / "runs" / "_test_stage4b_counting"
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = base_output_dir / "warm_start_mismatch.pt"
+        source = self.make_model(
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="softmax_mass",
+            seed=31,
+        )
+        target = self.make_model(
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="topk_softmax_mass",
+            seed=32,
+        )
+        _write_model_checkpoint(
+            checkpoint_path,
+            source,
+            max_target_count=3,
+            metadata_overrides={"max_target_count": 4},
+        )
+        config = Stage4BConfig(
+            alpha_mode="constant",
+            readout_mode="topk_softmax_mass",
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            warm_start_checkpoint=str(checkpoint_path),
+            warm_start_mode="score_only",
+        )
+
+        with self.assertRaisesRegex(ValueError, "max_target_count"):
+            apply_score_only_warm_start(target, config, device=torch.device("cpu"))
+
 
 class Stage4BEvalTest(unittest.TestCase):
     """Validate Stage 4B evaluation and chunking."""
@@ -465,6 +579,42 @@ class Stage4BEvalTest(unittest.TestCase):
             readout_mode="topk_softmax_mass",
             target_token_count=1,
             top_k=3,
+        )
+        self.assert_evaluations_match(single, chunked)
+
+    def test_warm_started_topk_chunked_evaluation_matches_single_chunk_evaluation(self) -> None:
+        def make_warm_started_model() -> SimplifiedLastQueryAttentionCounter:
+            model = self.make_model(
+                readout_mode="topk_softmax_mass",
+                target_token_count=1,
+                top_k=3,
+            )
+            model.warm_start_checkpoint = "dummy_source.pt"
+            model.warm_start_mode = "score_only"
+            return model
+
+        common_kwargs = dict(
+            length=10,
+            examples=24,
+            eval_sampling_mode="stratified",
+            batch_size=5,
+            seed=789,
+            target_position_mode="nonfinal_random",
+            target_token_count=1,
+            non_target_token_count=1,
+            non_target_sampling="uniform",
+            max_target_count=3,
+            device=torch.device("cpu"),
+        )
+        single = evaluate_length(
+            make_warm_started_model(),
+            eval_chunk_examples=24,
+            **common_kwargs,
+        )
+        chunked = evaluate_length(
+            make_warm_started_model(),
+            eval_chunk_examples=5,
+            **common_kwargs,
         )
         self.assert_evaluations_match(single, chunked)
 
@@ -730,6 +880,106 @@ class Stage4BDefaultRunTest(unittest.TestCase):
         self.assertEqual(metric_rows[0]["top_k"], 3)
         self.assertEqual(metric_rows[0]["effective_top_k"], 3.0)
         self.assertIn("mean_topk_target_count", metric_rows[0])
+        self.assertEqual(len(count_rows), config.max_target_count + 1)
+        self.assertEqual(
+            len(confusion_rows),
+            (config.max_target_count + 1) * (config.max_target_count + 1),
+        )
+        self.assertEqual(len(target_type_rows), config.target_token_count)
+        self.assertTrue(0.0 <= metric_rows[0]["accuracy"] <= 1.0)
+
+    def test_tiny_train_and_eval_runs_for_warm_started_topk_softmax_mass(self) -> None:
+        base_output_dir = ROOT / "runs" / "_test_stage4b_counting"
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+        source_output_dir = base_output_dir / "warm_start_source"
+        source_output_dir.mkdir(exist_ok=True)
+        source_config = Stage4BConfig(
+            seed=46,
+            device="cpu",
+            output_dir=str(source_output_dir),
+            alpha_mode="constant",
+            readout_mode="softmax_mass",
+            train_length=8,
+            target_position_mode="nonfinal_random",
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            train_examples=24,
+            val_examples=12,
+            test_examples=12,
+            eval_chunk_examples=5,
+            eval_sampling_mode="stratified",
+            eval_lengths=(8, 12),
+            batch_size=8,
+            eval_batch_size=4,
+            epochs=1,
+            max_train_steps=2,
+        )
+        source_model, _ = train_model(
+            source_config,
+            device=torch.device("cpu"),
+            output_dir=source_output_dir,
+        )
+        checkpoint_path = source_output_dir / "model.pt"
+        _write_model_checkpoint(
+            checkpoint_path,
+            source_model,
+            max_target_count=source_config.max_target_count,
+        )
+
+        output_dir = base_output_dir / "warm_started_topk_softmax_mass"
+        output_dir.mkdir(exist_ok=True)
+        config = Stage4BConfig(
+            seed=47,
+            device="cpu",
+            output_dir=str(output_dir),
+            alpha_mode="constant",
+            readout_mode="topk_softmax_mass",
+            top_k=3,
+            warm_start_checkpoint=str(checkpoint_path),
+            warm_start_mode="score_only",
+            train_length=8,
+            target_position_mode="nonfinal_random",
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            train_examples=24,
+            val_examples=12,
+            test_examples=12,
+            eval_chunk_examples=5,
+            eval_sampling_mode="stratified",
+            eval_lengths=(8, 12),
+            batch_size=8,
+            eval_batch_size=4,
+            epochs=1,
+            max_train_steps=2,
+        )
+
+        model, updates = train_model(
+            config,
+            device=torch.device("cpu"),
+            output_dir=output_dir,
+        )
+        self.assertGreater(updates, 0)
+        metric_rows, count_rows, confusion_rows, target_type_rows = evaluate_length(
+            model,
+            length=12,
+            examples=config.test_examples,
+            eval_chunk_examples=config.eval_chunk_examples,
+            eval_sampling_mode=config.eval_sampling_mode,
+            batch_size=config.eval_batch_size,
+            seed=config.seed + 10_000 + 12,
+            target_position_mode=config.target_position_mode,
+            target_token_count=config.target_token_count,
+            non_target_token_count=config.non_target_token_count,
+            non_target_sampling=config.non_target_sampling,
+            max_target_count=config.max_target_count,
+            device=torch.device("cpu"),
+        )
+
+        self.assertEqual(metric_rows[0]["readout_mode"], "topk_softmax_mass")
+        self.assertEqual(metric_rows[0]["warm_start_mode"], "score_only")
+        self.assertEqual(metric_rows[0]["warm_start_checkpoint"], str(checkpoint_path))
         self.assertEqual(len(count_rows), config.max_target_count + 1)
         self.assertEqual(
             len(confusion_rows),
