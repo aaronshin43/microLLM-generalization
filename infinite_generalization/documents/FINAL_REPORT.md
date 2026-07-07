@@ -2,7 +2,25 @@
 
 ## Abstract
 
-[placeholder]
+Softmax attention classifiers trained on short sequences can fail to generalize
+to much longer sequences, even on simple target-token detection tasks. This
+report studies that failure mode in a deliberately reduced binary attention
+classifier. The model sees sequences containing either one target token or only
+non-target tokens, and a single final query attends over the sequence before a
+binary classifier makes the prediction. We compare constant, fixed-log, and
+learned-log score multipliers to test when length-aware attention scaling
+overcomes the growing softmax denominator. Let $\Delta$ denote the score margin
+between the target and non-target tokens, and let $c$ denote the learned
+coefficient in the learned-log multiplier. The trained model satisfies the
+two-score assumption: one target score and one shared non-target score.
+Therefore, the closed-form target-attention equation accurately describes the
+learned model. The experiments show three regimes. A constant multiplier
+improves with more training but fails asymptotically. A fixed-log multiplier
+succeeds when $\Delta>1$. A learned-log multiplier succeeds only after
+optimization pushes the effective product $c\Delta$ above 1. Thus, passing a
+finite long-sequence evaluation is not sufficient evidence of infinite-length
+generalization; the effective margin must grow faster than the softmax
+denominator.
 
 ## Introduction
 
