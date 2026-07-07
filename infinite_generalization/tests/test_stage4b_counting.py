@@ -21,6 +21,7 @@ from stage4b_counting import (  # noqa: E402
     count_class_labels,
     evaluate_length,
     make_count_dataset,
+    topk_selection_diagnostics,
     train_model,
 )
 
@@ -105,6 +106,7 @@ class Stage4BModelTest(unittest.TestCase):
         max_target_count: int = 4,
         alpha_mode: str = "constant",
         readout_mode: str = "softmax_mass",
+        top_k: int = 3,
     ) -> SimplifiedLastQueryAttentionCounter:
         torch.manual_seed(0)
         return SimplifiedLastQueryAttentionCounter(
@@ -115,6 +117,7 @@ class Stage4BModelTest(unittest.TestCase):
             non_target_token_count=non_target_token_count,
             max_target_count=max_target_count,
             readout_mode=readout_mode,
+            top_k=top_k,
         )
 
     def test_value_masses_sum_to_one_per_example(self) -> None:
@@ -228,6 +231,141 @@ class Stage4BModelTest(unittest.TestCase):
             )
         )
 
+    def test_topk_softmax_output_shape_is_value_dimension(self) -> None:
+        model = self.make_model(
+            target_token_count=2,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="topk_softmax_mass",
+            top_k=3,
+        )
+        tokens = torch.tensor([[0, 2, 1, 2], [2, 0, 0, 2]])
+        _, details = model(tokens, return_details=True)
+
+        self.assertEqual(details["attention_output"].shape, (2, 3))
+        self.assertEqual(details["topk_indices"].shape, (2, 3))
+        self.assertTrue(torch.allclose(details["attention_output"].sum(dim=1), torch.ones(2)))
+
+    def test_topk_softmax_uses_corrected_scores_and_excludes_unselected_positions(self) -> None:
+        model = self.make_model(
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="topk_softmax_mass",
+            top_k=2,
+        )
+        tokens = torch.tensor([[0, 0, 1, 1]])
+        corrected_scores = torch.tensor([[10.0, 1.0, 9.0, 8.0]])
+        output, details = model.topk_softmax_value_output(
+            tokens,
+            corrected_scores,
+            return_details=True,
+        )
+        expected_weights = torch.softmax(torch.tensor([10.0, 9.0]), dim=0)
+
+        self.assertEqual(details["topk_indices"].tolist(), [[0, 2]])
+        self.assertAlmostEqual(output[0, 0].item(), expected_weights[0].item(), places=6)
+        self.assertAlmostEqual(output[0, 1].item(), expected_weights[1].item(), places=6)
+
+    def test_topk_softmax_matches_renormalized_full_softmax_on_selected_subset(self) -> None:
+        model = self.make_model(
+            target_token_count=2,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="topk_softmax_mass",
+            top_k=3,
+        )
+        tokens = torch.tensor([[0, 2, 1, 2, 0]])
+        corrected_scores = torch.tensor([[0.5, 2.0, 1.5, -1.0, 1.0]])
+        output, details = model.topk_softmax_value_output(
+            tokens,
+            corrected_scores,
+            return_details=True,
+        )
+        full_softmax = torch.softmax(corrected_scores, dim=1)
+        selected_weights = full_softmax.gather(1, details["topk_indices"])
+        selected_weights = selected_weights / selected_weights.sum(dim=1, keepdim=True)
+        selected_tokens = tokens.gather(1, details["topk_indices"])
+        expected = torch.stack(
+            [
+                selected_weights.masked_fill(selected_tokens.ne(0), 0.0).sum(dim=1),
+                selected_weights.masked_fill(selected_tokens.ne(1), 0.0).sum(dim=1),
+                selected_weights.masked_fill(selected_tokens.lt(2), 0.0).sum(dim=1),
+            ],
+            dim=1,
+        )
+
+        self.assertTrue(torch.allclose(output, expected, atol=1e-6))
+
+    def test_topk_selection_diagnostics_report_ranking_success_and_failure(self) -> None:
+        tokens = torch.tensor(
+            [
+                [0, 0, 0, 1, 1],
+                [0, 0, 1, 1, 1],
+            ]
+        )
+        labels = torch.tensor([3, 2])
+        topk_indices = torch.tensor(
+            [
+                [0, 1, 2],
+                [0, 2, 3],
+            ]
+        )
+        diagnostics = topk_selection_diagnostics(
+            tokens=tokens,
+            labels=labels,
+            topk_indices=topk_indices,
+            target_token_count=1,
+        )
+
+        self.assertEqual(diagnostics["topk_target_count"].tolist(), [3.0, 1.0])
+        self.assertEqual(diagnostics["topk_non_target_count"].tolist(), [0.0, 2.0])
+        self.assertEqual(diagnostics["topk_all_targets_included"].tolist(), [1.0, 0.0])
+        self.assertTrue(
+            torch.allclose(
+                diagnostics["topk_target_recall"],
+                torch.tensor([1.0, 0.5]),
+            )
+        )
+
+    def test_topk_includes_all_targets_when_targets_rank_highest_up_to_max_count(self) -> None:
+        model = self.make_model(
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            readout_mode="topk_softmax_mass",
+            top_k=3,
+        )
+        tokens = torch.tensor(
+            [
+                [0, 1, 1, 1, 1],
+                [0, 0, 1, 1, 1],
+                [0, 0, 0, 1, 1],
+            ]
+        )
+        labels = torch.tensor([1, 2, 3])
+        corrected_scores = torch.tensor(
+            [
+                [10.0, 0.0, 0.0, 0.0, 0.0],
+                [10.0, 9.0, 0.0, 0.0, 0.0],
+                [10.0, 9.0, 8.0, 0.0, 0.0],
+            ]
+        )
+        _, details = model.topk_softmax_value_output(
+            tokens,
+            corrected_scores,
+            return_details=True,
+        )
+        diagnostics = topk_selection_diagnostics(
+            tokens=tokens,
+            labels=labels,
+            topk_indices=details["topk_indices"],
+            target_token_count=1,
+        )
+
+        self.assertEqual(diagnostics["topk_target_count"].tolist(), [1.0, 2.0, 3.0])
+        self.assertEqual(diagnostics["topk_all_targets_included"].tolist(), [1.0, 1.0, 1.0])
+
 
 class Stage4BEvalTest(unittest.TestCase):
     """Validate Stage 4B evaluation and chunking."""
@@ -237,6 +375,7 @@ class Stage4BEvalTest(unittest.TestCase):
         *,
         readout_mode: str = "softmax_mass",
         target_token_count: int = 2,
+        top_k: int = 3,
     ) -> SimplifiedLastQueryAttentionCounter:
         torch.manual_seed(7)
         return SimplifiedLastQueryAttentionCounter(
@@ -247,6 +386,7 @@ class Stage4BEvalTest(unittest.TestCase):
             non_target_token_count=1,
             max_target_count=3,
             readout_mode=readout_mode,
+            top_k=top_k,
         )
 
     def evaluate(
@@ -256,11 +396,13 @@ class Stage4BEvalTest(unittest.TestCase):
         eval_chunk_examples: int,
         readout_mode: str = "softmax_mass",
         target_token_count: int = 2,
+        top_k: int = 3,
     ):
         return evaluate_length(
             self.make_model(
                 readout_mode=readout_mode,
                 target_token_count=target_token_count,
+                top_k=top_k,
             ),
             length=10,
             examples=examples,
@@ -306,6 +448,23 @@ class Stage4BEvalTest(unittest.TestCase):
             eval_chunk_examples=5,
             readout_mode="target_numerator_only",
             target_token_count=1,
+        )
+        self.assert_evaluations_match(single, chunked)
+
+    def test_topk_chunked_evaluation_matches_single_chunk_evaluation(self) -> None:
+        single = self.evaluate(
+            examples=24,
+            eval_chunk_examples=24,
+            readout_mode="topk_softmax_mass",
+            target_token_count=1,
+            top_k=3,
+        )
+        chunked = self.evaluate(
+            examples=24,
+            eval_chunk_examples=5,
+            readout_mode="topk_softmax_mass",
+            target_token_count=1,
+            top_k=3,
         )
         self.assert_evaluations_match(single, chunked)
 
@@ -508,6 +667,69 @@ class Stage4BDefaultRunTest(unittest.TestCase):
         )
 
         self.assertEqual(metric_rows[0]["readout_mode"], "target_numerator_only")
+        self.assertEqual(len(count_rows), config.max_target_count + 1)
+        self.assertEqual(
+            len(confusion_rows),
+            (config.max_target_count + 1) * (config.max_target_count + 1),
+        )
+        self.assertEqual(len(target_type_rows), config.target_token_count)
+        self.assertTrue(0.0 <= metric_rows[0]["accuracy"] <= 1.0)
+
+    def test_tiny_train_and_eval_runs_for_topk_softmax_mass(self) -> None:
+        base_output_dir = ROOT / "runs" / "_test_stage4b_counting"
+        base_output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = base_output_dir / "topk_softmax_mass"
+        output_dir.mkdir(exist_ok=True)
+        config = Stage4BConfig(
+            seed=45,
+            device="cpu",
+            output_dir=str(output_dir),
+            alpha_mode="constant",
+            readout_mode="topk_softmax_mass",
+            top_k=3,
+            train_length=8,
+            target_position_mode="nonfinal_random",
+            target_token_count=1,
+            non_target_token_count=1,
+            max_target_count=3,
+            train_examples=24,
+            val_examples=12,
+            test_examples=12,
+            eval_chunk_examples=5,
+            eval_sampling_mode="stratified",
+            eval_lengths=(8, 12),
+            batch_size=8,
+            eval_batch_size=4,
+            epochs=1,
+            max_train_steps=2,
+        )
+
+        model, updates = train_model(
+            config,
+            device=torch.device("cpu"),
+            output_dir=output_dir,
+        )
+        self.assertGreater(updates, 0)
+        metric_rows, count_rows, confusion_rows, target_type_rows = evaluate_length(
+            model,
+            length=12,
+            examples=config.test_examples,
+            eval_chunk_examples=config.eval_chunk_examples,
+            eval_sampling_mode=config.eval_sampling_mode,
+            batch_size=config.eval_batch_size,
+            seed=config.seed + 10_000 + 12,
+            target_position_mode=config.target_position_mode,
+            target_token_count=config.target_token_count,
+            non_target_token_count=config.non_target_token_count,
+            non_target_sampling=config.non_target_sampling,
+            max_target_count=config.max_target_count,
+            device=torch.device("cpu"),
+        )
+
+        self.assertEqual(metric_rows[0]["readout_mode"], "topk_softmax_mass")
+        self.assertEqual(metric_rows[0]["top_k"], 3)
+        self.assertEqual(metric_rows[0]["effective_top_k"], 3.0)
+        self.assertIn("mean_topk_target_count", metric_rows[0])
         self.assertEqual(len(count_rows), config.max_target_count + 1)
         self.assertEqual(
             len(confusion_rows),

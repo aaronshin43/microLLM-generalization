@@ -40,6 +40,7 @@ class Stage4BConfig:
     output_dir: str = "runs/stage4b_counting"
     alpha_mode: str = "constant"
     readout_mode: str = "softmax_mass"
+    top_k: int = 3
     train_length: int = 10
     train_lengths: tuple[int, ...] = ()
     target_position_mode: str = "fixed_start"
@@ -422,7 +423,12 @@ def iter_count_eval_batches(
 class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier):
     """Reduced last-query attention model with a count-class readout."""
 
-    READOUT_MODES = {"softmax_mass", "unnormalized_sum", "target_numerator_only"}
+    READOUT_MODES = {
+        "softmax_mass",
+        "unnormalized_sum",
+        "target_numerator_only",
+        "topk_softmax_mass",
+    }
 
     def __init__(
         self,
@@ -434,6 +440,7 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
         non_target_token_count: int = 1,
         max_target_count: int = 3,
         readout_mode: str = "softmax_mass",
+        top_k: int = 3,
     ) -> None:
         super().__init__(
             d_head=d_head,
@@ -448,8 +455,11 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
             raise ValueError(f"Unsupported readout_mode: {readout_mode}")
         if readout_mode == "target_numerator_only" and target_token_count != 1:
             raise ValueError("target_numerator_only currently requires target_token_count=1.")
+        if top_k < 1:
+            raise ValueError("top_k must be at least 1.")
         self.max_target_count = max_target_count
         self.readout_mode = readout_mode
+        self.top_k = top_k
         self.value_dim = 1 if readout_mode == "target_numerator_only" else target_token_count + 1
         self.num_count_classes = max_target_count + 1
         self.classifier = nn.Linear(self.value_dim, self.num_count_classes)
@@ -503,6 +513,45 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
         ).sum(dim=1)
         return target_sum.unsqueeze(1)
 
+    def topk_softmax_value_output(
+        self,
+        tokens: torch.Tensor,
+        corrected_scores: torch.Tensor,
+        *,
+        return_details: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Return per-type masses from a corrected-score top-k subset softmax."""
+
+        effective_top_k = min(self.top_k, corrected_scores.shape[1])
+        top_values, top_indices = torch.topk(corrected_scores, k=effective_top_k, dim=1)
+        top_weights = torch.softmax(top_values, dim=-1)
+        top_tokens = tokens.gather(1, top_indices)
+        masses = [
+            top_weights.masked_fill(top_tokens.ne(token_id), 0.0).sum(dim=1)
+            for token_id in range(self.target_token_count)
+        ]
+        non_target_mass = top_weights.masked_fill(
+            top_tokens.lt(self.target_token_count),
+            0.0,
+        ).sum(dim=1)
+        output = torch.stack(masses + [non_target_mass], dim=1)
+
+        if not return_details:
+            return output
+
+        details = {
+            "topk_indices": top_indices,
+            "topk_weights": top_weights,
+            "topk_tokens": top_tokens,
+            "effective_top_k": torch.full(
+                (tokens.shape[0],),
+                effective_top_k,
+                device=tokens.device,
+                dtype=torch.long,
+            ),
+        }
+        return output, details
+
     def readout_value_output(
         self,
         tokens: torch.Tensor,
@@ -515,6 +564,8 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
             return self.token_value_output(tokens, attention_weights)
         if self.readout_mode == "target_numerator_only":
             return self.target_numerator_only_output(tokens, corrected_scores)
+        if self.readout_mode == "topk_softmax_mass":
+            return self.topk_softmax_value_output(tokens, corrected_scores)
         return self.unnormalized_value_output(tokens, corrected_scores)
 
     def forward(
@@ -533,11 +584,19 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
         corrected_scores = alpha * raw_scores
         attention_weights = torch.softmax(corrected_scores, dim=-1)
         normalized_attention_output = self.token_value_output(tokens, attention_weights)
-        attention_output = self.readout_value_output(
-            tokens,
-            attention_weights,
-            corrected_scores,
-        )
+        topk_details: dict[str, torch.Tensor] = {}
+        if self.readout_mode == "topk_softmax_mass":
+            attention_output, topk_details = self.topk_softmax_value_output(
+                tokens,
+                corrected_scores,
+                return_details=True,
+            )
+        else:
+            attention_output = self.readout_value_output(
+                tokens,
+                attention_weights,
+                corrected_scores,
+            )
         logits = self.classifier(attention_output)
 
         if not return_details:
@@ -552,6 +611,7 @@ class SimplifiedLastQueryAttentionCounter(SimplifiedLastQueryAttentionClassifier
             "last_query": last_query,
             "alpha": alpha.expand(tokens.shape[0]),
         }
+        details.update(topk_details)
         return logits, details
 
 
@@ -569,9 +629,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--readout-mode",
-        choices=("softmax_mass", "unnormalized_sum", "target_numerator_only"),
+        choices=tuple(sorted(SimplifiedLastQueryAttentionCounter.READOUT_MODES)),
         default=Stage4BConfig.readout_mode,
     )
+    parser.add_argument("--top-k", type=int, default=Stage4BConfig.top_k)
     parser.add_argument("--train-length", type=int, default=Stage4BConfig.train_length)
     parser.add_argument("--train-lengths", type=int, nargs="+", default=None)
     parser.add_argument(
@@ -644,6 +705,8 @@ def build_config(args: argparse.Namespace) -> Stage4BConfig:
         raise ValueError("--max-train-steps must be positive when provided.")
     if args.readout_mode not in SimplifiedLastQueryAttentionCounter.READOUT_MODES:
         raise ValueError(f"Unsupported readout mode: {args.readout_mode}")
+    if args.top_k < 1:
+        raise ValueError("--top-k must be at least 1.")
     if args.target_token_count < 1:
         raise ValueError("--target-token-count must be at least 1.")
     if args.non_target_token_count < 1:
@@ -659,6 +722,7 @@ def build_config(args: argparse.Namespace) -> Stage4BConfig:
         output_dir=output_dir,
         alpha_mode=args.alpha_mode,
         readout_mode=args.readout_mode,
+        top_k=args.top_k,
         train_length=args.train_length,
         train_lengths=train_lengths,
         target_position_mode=args.target_position_mode,
@@ -755,6 +819,40 @@ def _mean_or_nan(values: torch.Tensor) -> float:
     return values.mean().item() if values.numel() else float("nan")
 
 
+def _nanmean_or_nan(values: torch.Tensor) -> float:
+    """Return a finite-value tensor mean or NaN when no finite values exist."""
+
+    finite_values = values[torch.isfinite(values)]
+    return finite_values.mean().item() if finite_values.numel() else float("nan")
+
+
+def topk_selection_diagnostics(
+    *,
+    tokens: torch.Tensor,
+    labels: torch.Tensor,
+    topk_indices: torch.Tensor,
+    target_token_count: int,
+) -> dict[str, torch.Tensor]:
+    """Return per-example diagnostics for the selected top-k subset."""
+
+    selected_tokens = tokens.gather(1, topk_indices)
+    topk_target_count = selected_tokens.lt(target_token_count).sum(dim=1).to(dtype=torch.float32)
+    true_count = labels.to(dtype=torch.float32)
+    topk_target_recall = torch.full_like(topk_target_count, float("nan"))
+    positive_mask = labels.gt(0)
+    topk_target_recall[positive_mask] = (
+        topk_target_count[positive_mask] / true_count[positive_mask]
+    )
+    return {
+        "topk_target_count": topk_target_count,
+        "topk_target_recall": topk_target_recall,
+        "topk_all_targets_included": topk_target_count.eq(true_count).to(dtype=torch.float32),
+        "topk_non_target_count": selected_tokens.ge(target_token_count).sum(dim=1).to(
+            dtype=torch.float32
+        ),
+    }
+
+
 @torch.no_grad()
 def evaluate_length(
     model: SimplifiedLastQueryAttentionCounter,
@@ -781,6 +879,13 @@ def evaluate_length(
     non_target_readouts: list[torch.Tensor] = []
     target_attention_masses: list[torch.Tensor] = []
     non_target_attention_masses: list[torch.Tensor] = []
+    topk_target_masses: list[torch.Tensor] = []
+    topk_non_target_masses: list[torch.Tensor] = []
+    topk_target_counts: list[torch.Tensor] = []
+    topk_target_recalls: list[torch.Tensor] = []
+    topk_all_targets_included_values: list[torch.Tensor] = []
+    topk_non_target_counts: list[torch.Tensor] = []
+    effective_top_k_values: list[torch.Tensor] = []
     pos_min_margins: list[torch.Tensor] = []
     alpha_values: list[torch.Tensor] = []
     max_corrected_scores: list[torch.Tensor] = []
@@ -830,6 +935,34 @@ def evaluate_length(
             non_target_readout = readout_output[:, target_token_count]
         target_attention_mass = normalized_attention_output[:, :target_token_count].sum(dim=1)
         non_target_attention_mass = normalized_attention_output[:, target_token_count]
+        if model.readout_mode == "topk_softmax_mass":
+            topk_diagnostics = topk_selection_diagnostics(
+                tokens=tokens,
+                labels=labels,
+                topk_indices=details["topk_indices"],
+                target_token_count=target_token_count,
+            )
+            topk_target_mass = target_readout
+            topk_non_target_mass = non_target_readout
+            effective_top_k = details["effective_top_k"].to(dtype=torch.float32)
+        else:
+            topk_diagnostics = {
+                "topk_target_count": torch.full_like(labels, float("nan"), dtype=torch.float32),
+                "topk_target_recall": torch.full_like(labels, float("nan"), dtype=torch.float32),
+                "topk_all_targets_included": torch.full_like(
+                    labels, float("nan"), dtype=torch.float32
+                ),
+                "topk_non_target_count": torch.full_like(
+                    labels, float("nan"), dtype=torch.float32
+                ),
+            }
+            topk_target_mass = torch.full_like(target_readout, float("nan"))
+            topk_non_target_mass = torch.full_like(non_target_readout, float("nan"))
+            effective_top_k = torch.full_like(
+                labels,
+                min(model.top_k, length),
+                dtype=torch.float32,
+            )
 
         all_preds.append(preds.cpu())
         all_labels.append(labels.cpu())
@@ -837,6 +970,15 @@ def evaluate_length(
         non_target_readouts.append(non_target_readout.cpu())
         target_attention_masses.append(target_attention_mass.cpu())
         non_target_attention_masses.append(non_target_attention_mass.cpu())
+        topk_target_masses.append(topk_target_mass.cpu())
+        topk_non_target_masses.append(topk_non_target_mass.cpu())
+        topk_target_counts.append(topk_diagnostics["topk_target_count"].cpu())
+        topk_target_recalls.append(topk_diagnostics["topk_target_recall"].cpu())
+        topk_all_targets_included_values.append(
+            topk_diagnostics["topk_all_targets_included"].cpu()
+        )
+        topk_non_target_counts.append(topk_diagnostics["topk_non_target_count"].cpu())
+        effective_top_k_values.append(effective_top_k.cpu())
         alpha_values.append(details["alpha"].cpu())
         max_corrected_scores.append(details["corrected_scores"].amax(dim=1).cpu())
         max_readout_values.append(readout_output.detach().amax(dim=1).cpu())
@@ -888,6 +1030,13 @@ def evaluate_length(
     non_target_readout_cpu = torch.cat(non_target_readouts)
     target_attention_mass_cpu = torch.cat(target_attention_masses)
     non_target_attention_mass_cpu = torch.cat(non_target_attention_masses)
+    topk_target_mass_cpu = torch.cat(topk_target_masses)
+    topk_non_target_mass_cpu = torch.cat(topk_non_target_masses)
+    topk_target_count_cpu = torch.cat(topk_target_counts)
+    topk_target_recall_cpu = torch.cat(topk_target_recalls)
+    topk_all_targets_included_cpu = torch.cat(topk_all_targets_included_values)
+    topk_non_target_count_cpu = torch.cat(topk_non_target_counts)
+    effective_top_k_cpu = torch.cat(effective_top_k_values)
     alpha_cpu = torch.cat(alpha_values)
     max_corrected_score_cpu = torch.cat(max_corrected_scores)
     max_readout_value_cpu = torch.cat(max_readout_values)
@@ -906,6 +1055,8 @@ def evaluate_length(
         "split": "test",
         "alpha_mode": model.alpha_mode,
         "readout_mode": model.readout_mode,
+        "top_k": model.top_k,
+        "effective_top_k": _mean_or_nan(effective_top_k_cpu),
         "target_position_mode": target_position_mode,
         "target_token_count": target_token_count,
         "non_target_token_count": non_target_token_count,
@@ -924,6 +1075,12 @@ def evaluate_length(
         "mean_non_target_readout": _mean_or_nan(non_target_readout_cpu),
         "mean_target_attention_mass": _mean_or_nan(target_attention_mass_cpu),
         "mean_non_target_attention_mass": _mean_or_nan(non_target_attention_mass_cpu),
+        "mean_topk_target_mass": _mean_or_nan(topk_target_mass_cpu),
+        "mean_topk_non_target_mass": _mean_or_nan(topk_non_target_mass_cpu),
+        "mean_topk_target_count": _mean_or_nan(topk_target_count_cpu),
+        "mean_topk_target_recall": _nanmean_or_nan(topk_target_recall_cpu),
+        "mean_topk_all_targets_included": _mean_or_nan(topk_all_targets_included_cpu),
+        "mean_topk_non_target_count": _mean_or_nan(topk_non_target_count_cpu),
         "mean_max_corrected_score": _mean_or_nan(max_corrected_score_cpu),
         "max_corrected_score": max_corrected_score_cpu.max().item(),
         "mean_max_readout_value": _mean_or_nan(max_readout_value_cpu),
@@ -951,6 +1108,8 @@ def evaluate_length(
                 "split": "test",
                 "alpha_mode": model.alpha_mode,
                 "readout_mode": model.readout_mode,
+                "top_k": model.top_k,
+                "effective_top_k": _mean_or_nan(effective_top_k_cpu[mask]),
                 "target_position_mode": target_position_mode,
                 "target_token_count": target_token_count,
                 "non_target_token_count": non_target_token_count,
@@ -971,6 +1130,14 @@ def evaluate_length(
                 "mean_non_target_attention_mass": _mean_or_nan(
                     non_target_attention_mass_cpu[mask]
                 ),
+                "mean_topk_target_mass": _mean_or_nan(topk_target_mass_cpu[mask]),
+                "mean_topk_non_target_mass": _mean_or_nan(topk_non_target_mass_cpu[mask]),
+                "mean_topk_target_count": _mean_or_nan(topk_target_count_cpu[mask]),
+                "mean_topk_target_recall": _nanmean_or_nan(topk_target_recall_cpu[mask]),
+                "mean_topk_all_targets_included": _mean_or_nan(
+                    topk_all_targets_included_cpu[mask]
+                ),
+                "mean_topk_non_target_count": _mean_or_nan(topk_non_target_count_cpu[mask]),
             }
         )
 
@@ -988,6 +1155,8 @@ def evaluate_length(
                     "split": "test",
                     "alpha_mode": model.alpha_mode,
                     "readout_mode": model.readout_mode,
+                    "top_k": model.top_k,
+                    "effective_top_k": _mean_or_nan(effective_top_k_cpu[true_mask]),
                     "true_count": true_count,
                     "predicted_count": predicted_count,
                     "examples": cell,
@@ -1006,6 +1175,8 @@ def evaluate_length(
                 "split": "test",
                 "alpha_mode": model.alpha_mode,
                 "readout_mode": model.readout_mode,
+                "top_k": model.top_k,
+                "effective_top_k": _mean_or_nan(effective_top_k_cpu),
                 "target_token_id": token_id,
                 "examples": int(readout.numel()),
                 "present_examples": int(present.sum().item()),
@@ -1059,6 +1230,7 @@ def train_model(
         non_target_token_count=config.non_target_token_count,
         max_target_count=config.max_target_count,
         readout_mode=config.readout_mode,
+        top_k=config.top_k,
     ).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(
@@ -1173,6 +1345,7 @@ def main() -> None:
             "d_head": config.d_head,
             "alpha_mode": config.alpha_mode,
             "readout_mode": config.readout_mode,
+            "top_k": config.top_k,
             "alpha_log_scale_init": config.alpha_log_scale_init,
             "target_token_count": config.target_token_count,
             "non_target_token_count": config.non_target_token_count,
