@@ -1,3 +1,354 @@
+# Task: Stage 4B Ablation 3B - Warm-Started Top-K Restricted Softmax
+
+## Objective
+
+The cold-start `topk_softmax_mass` ablation failed before it could test the intended bounded
+denominator idea. Across seeds `42`, `43`, and `44`, the hard top-k subset selected only
+non-target tokens, so the classifier saw a constant readout and the score-ranking side received
+little useful signal to move target tokens into the selected subset.
+
+This task tests the most direct follow-up:
+
+```text
+Warm-start top-k from a differentiable full-softmax model.
+```
+
+The central question is:
+
+**If the model first learns a target-over-non-target ranking through full softmax, can the
+same reduced model then use `topk_softmax_mass` to preserve count information across length?**
+
+This separates two hypotheses:
+
+```text
+cold-start ranking failure:
+    hard top-k is usable after the ranking is learned, but cannot learn the ranking from
+    scratch because target tokens are initially outside the selected subset
+
+top-k readout failure:
+    even with a good ranking, the restricted top-k mass does not separate exact count classes
+    robustly across length
+```
+
+## Background
+
+The cold-start top-k ablation selects the top-$R$ positions by corrected score:
+
+```math
+r_j = \alpha(n) s_j,
+```
+
+where $s_j$ is the raw query-key score and $\alpha(n)$ is the configured length multiplier.
+It then computes a softmax only over the selected set:
+
+```math
+J_R(x) =
+\operatorname{TopR}\{r_0,r_1,\dots,r_{n-1}\}.
+```
+
+If all true target positions enter $J_R(x)$ and true count $k \le R$, the idealized target mass
+is:
+
+```math
+m_k^{\text{top-}R}
+=
+\frac{k e^{\alpha\Delta}}{k e^{\alpha\Delta} + (R-k)}.
+```
+
+The denominator contains $(R-k)$ instead of $(n-k)$, so it should not dilute with sequence
+length. However, this reasoning assumes the ranking condition is already satisfied. The
+cold-start runs violated that condition: target positions never entered top-k.
+
+Full softmax is differentiable over all positions:
+
+```math
+a_j =
+\frac{e^{r_j}}{\sum_\ell e^{r_\ell}}.
+```
+
+Even if target scores are initially lower than non-target scores, target positions still
+receive nonzero attention mass and therefore receive gradient signal from the count loss.
+Warm-start uses this differentiable path to first train the score ranking, then switches to
+the hard top-k readout.
+
+## Scope
+
+Implement only the warm-started top-k diagnostic.
+
+Keep unchanged:
+
+- Stage 4B dataset and count labels,
+- `constant`, `log`, and `learned_log` alpha modes,
+- `topk_softmax_mass` readout definition,
+- `top_k = 3` primary setting,
+- chunked and stratified evaluation,
+- existing cold-start top-k runs for comparison.
+
+Do not implement yet:
+
+- differentiable top-k relaxation,
+- ranking auxiliary loss,
+- learned or adaptive `top_k`,
+- multi-length training,
+- multi-target-type counting,
+- full-transformer Stage 1/2 changes.
+
+## Warm-Start Design
+
+Use two phases.
+
+### Phase 1: Differentiable Ranking Pretraining
+
+Train or reuse a `softmax_mass` Stage 4B checkpoint with the same base setting:
+
+```text
+target_token_count     = 1
+non_target_token_count = 1
+max_target_count       = 3
+target_position_mode   = fixed_start
+train_length           = 10
+eval_sampling_mode     = stratified
+```
+
+The existing e500 baseline checkpoints under `runs/stage4b/` are acceptable warm-start
+sources:
+
+```text
+runs/stage4b/constant_e500_t1_nt1_k3/model.pt
+runs/stage4b/log_e500_t1_nt1_k3/model.pt
+runs/stage4b/learned_log_e500_t1_nt1_k3/model.pt
+```
+
+The purpose of Phase 1 is not long-length counting success. It is to obtain score-side weights
+where target scores rank above non-target scores at the training length.
+
+### Phase 2: Hard Top-K Fine-Tuning
+
+Create a `topk_softmax_mass` model and initialize its score-side parameters from the Phase 1
+checkpoint:
+
+```text
+query_projection
+key_projection
+alpha_log_scale_unconstrained
+```
+
+Prefer reinitializing the count classifier for the primary diagnostic. The top-k readout has a
+different calibration from full-softmax mass, so a fresh classifier makes the question cleaner:
+
+```text
+given a learned ranking, can top-k mass learn count thresholds?
+```
+
+If classifier-copying is easy, it can be an optional sanity check, but do not make it the
+primary result.
+
+Fine-tune with:
+
+```text
+readout_mode = topk_softmax_mass
+top_k        = 3
+```
+
+## Required Implementation
+
+Add a way to warm-start Stage 4B training from an existing checkpoint. A suggested CLI/API is:
+
+```text
+--warm-start-checkpoint PATH
+--warm-start-mode score_only
+```
+
+Supported mode for this task:
+
+```text
+score_only:
+    load query projection, key projection, and learned alpha parameter
+    do not load classifier weights
+```
+
+Validation requirements:
+
+- checkpoint `target_token_count`, `non_target_token_count`, `max_target_count`, `d_head`, and
+  `alpha_mode` must match the new run config,
+- fail with a clear error on mismatches,
+- save warm-start metadata into `config.json` and `model.pt`,
+- preserve reproducibility for non-warm-start runs.
+
+## Diagnostics
+
+Keep all current Stage 4B and top-k diagnostics, especially:
+
+```text
+mean_topk_target_count
+mean_topk_target_recall
+mean_topk_all_targets_included
+mean_topk_non_target_count
+mean_topk_target_mass
+mean_topk_non_target_mass
+mean_target_attention_mass
+mean_min_margin_delta
+worst_min_margin_delta
+readout_finite_fraction
+```
+
+For warm-start runs, also record:
+
+```text
+warm_start_checkpoint
+warm_start_mode
+```
+
+Key diagnostic interpretation:
+
+```text
+If top-k target recall is high but accuracy fails:
+    readout/calibration failure
+
+If top-k target recall remains zero:
+    warm start did not solve ranking
+
+If train length succeeds and 10M succeeds:
+    cold-start ranking was the main blocker
+
+If train length succeeds but 10M fails:
+    top-k may learn finite count thresholds but still lacks length-stable calibration
+```
+
+## Implementation Plan
+
+### Step 1: Add Warm-Start Loading
+
+Add checkpoint loading support to `stage4b_counting.py` for score-only initialization.
+
+### Step 2: Thread Metadata
+
+Thread `warm_start_checkpoint` and `warm_start_mode` through:
+
+```text
+config dataclass
+CLI
+saved config JSON
+model checkpoint metadata
+metrics CSVs
+count metrics
+confusion outputs
+```
+
+### Step 3: Tests
+
+Add or update tests under `infinite_generalization/tests/`:
+
+1. Existing Stage 4B tests still pass.
+2. Score-only warm start copies query/key/alpha parameters.
+3. Score-only warm start does not copy classifier parameters.
+4. Mismatched checkpoint metadata raises a clear error.
+5. Chunked evaluation still works for warm-started `topk_softmax_mass`.
+6. A tiny warm-start training/eval run completes end to end.
+
+### Step 4: Smoke Runs
+
+Run tiny smoke configurations for:
+
+```text
+constant
+log
+learned_log
+```
+
+with:
+
+```text
+readout_mode          = topk_softmax_mass
+top_k                 = 3
+warm_start_mode       = score_only
+warm_start_checkpoint = matching softmax_mass smoke checkpoint
+```
+
+Use a separate output directory:
+
+```text
+runs/stage4b/ablation3_topk_warmstart_smoke/
+```
+
+### Step 5: Main Runs
+
+Run the base Stage 4B setting with `top_k = 3` and score-only warm starts from the matching
+e500 `softmax_mass` checkpoints.
+
+Output directory:
+
+```text
+runs/stage4b/ablation3_topk_warmstart/
+```
+
+Recommended run names:
+
+```text
+constant_e500_topk3_score_warmstart_t1_nt1_k3
+log_e500_topk3_score_warmstart_t1_nt1_k3
+learned_log_e500_topk3_score_warmstart_t1_nt1_k3
+```
+
+Use the same evaluation setup as the cold-start top-k main runs:
+
+```text
+test_examples        = 720
+eval_chunk_examples  = 36
+eval_lengths         = 10 ... 10000000
+max_train_steps      = 16000
+```
+
+If seed 42 changes the conclusion, repeat with seeds `43` and `44` without overwriting the
+primary run:
+
+```text
+runs/stage4b/ablation3_topk_warmstart/seed43/
+runs/stage4b/ablation3_topk_warmstart/seed44/
+```
+
+### Step 6: Report Update
+
+Update `STAGE4B_COUNTING_TARGET_OCCURRENCES.md` with a short warm-start interpretation.
+
+## Analysis Questions
+
+After the runs complete, answer:
+
+```text
+Does score-only warm start make target positions enter the top-k subset?
+Does topk_softmax_mass fit the training length after warm start?
+Does it avoid collapse at 10M?
+If it fails, is the failure now ranking failure or readout/calibration failure?
+Does constant scaling benefit most from warm-started top-k?
+Do log and learned_log saturate positive counts once the denominator is fixed?
+Does this support the hypothesis that cold-start hard selection caused the original failure?
+```
+
+## Done Criteria
+
+This task is complete when:
+
+1. Warm-start checkpoint loading is implemented for Stage 4B score-side parameters.
+2. Warm-start metadata is saved in configs, checkpoints, and CSV outputs.
+3. Tests cover score-only loading and mismatch handling.
+4. Smoke runs pass for all three alpha modes.
+5. Main warm-start top-k runs complete under
+   `runs/stage4b/ablation3_topk_warmstart/`.
+6. The Stage 4B report is updated with the warm-start diagnostic result.
+
+## Out Of Scope
+
+- Treating warm-started top-k as the final architecture.
+- Differentiable top-k relaxation.
+- Ranking auxiliary loss.
+- Learned or adaptive `top_k`.
+- Multi-length training.
+- Multi-target-type counting.
+- Full-transformer Stage 1/2 changes.
+
+<!-- Previous completed Ablation 3 task retained below for reference only.
+
 # Task: Stage 4B Ablation 3 - Top-K Restricted Softmax
 
 ## Objective
@@ -470,6 +821,8 @@ This task is complete when:
 - Multi-length training.
 - Multi-target-type counting.
 - Full-transformer Stage 1/2 changes.
+
+-->
 
 <!-- Previous completed Ablation 2 task retained below for reference only.
 
