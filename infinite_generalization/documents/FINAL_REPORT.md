@@ -2,6 +2,7 @@
 
 ## Abstract
 
+_jmac Don't use so much detailed technical notation and definitions in the abstract. Try to describe the conclusion and findings in prose rather than symbols and formulas. jmac_ 
 Softmax attention classifiers trained on short sequences can fail to generalize
 to much longer sequences, even on simple target-token detection tasks. This
 report studies that failure mode in a deliberately reduced binary attention
@@ -18,12 +19,13 @@ learned model. The experiments show three regimes. A constant multiplier
 improves with more training but fails asymptotically. A fixed-log multiplier
 succeeds when $\Delta>1$. A learned-log multiplier succeeds only after
 optimization pushes the effective product $c\Delta$ above 1. Thus, passing a
-finite long-sequence evaluation is not sufficient evidence of infinite-length _jmac_ We may want to refer to unbounded length rather than infinite length _jmac_
+finite long-sequence evaluation is not sufficient evidence of infinite-length _jmac We may want to refer to unbounded length rather than infinite length jmac_
 generalization; the effective margin must grow faster than the softmax
 denominator.
 
 ## Introduction
 
+_jmac A similar comment to the abstract. This introduction introduces too much technical detail that is not explained. The reader cannot understand the issue with the softmax denominator until the model is more clear. Add some additional explanation here but leave the technical details until later.  jmac_ 
 Length generalization is a basic difficulty for sequence models. A classifier can
 fit short training sequences while relying on a mechanism that does not remain
 valid at longer sequence lengths. This problem appears even in simple
@@ -68,6 +70,8 @@ training makes $c\Delta>1$. This last point is important: a model can pass a
 finite evaluation length such as 10 million while still being predicted to fail
 at much larger lengths if $c\Delta<1$.
 
+_jmac Please add a related work section. This can be based on a single piece of literature if desired. See the instructions on "Related Work" at https://dnulab.org/internal/report-guidelines jmac_
+
 ## Background: Simplified Binary Attention
 
 The task uses a two-token vocabulary:
@@ -76,7 +80,8 @@ The task uses a two-token vocabulary:
 - $u$: non-target token
 
 A positive length-$n$ sequence has one target token followed by non-target
-tokens:
+_jmac Mention that we will be using a position-independent attention mechanism so the order of the tokens is irrelevant, except for the final target in the sequence which must be a non-target for this simple analysis. jmac_ 
+tokens: 
 
 ```text
 t, u, u, ..., u
@@ -88,7 +93,7 @@ A negative length-$n$ sequence contains only non-target tokens:
 u, u, u, ..., u
 ```
 
-The values are fixed one-hot vectors:
+The values _jmac token embeddings??? jmac_ are fixed one-hot vectors:
 
 ```math
 t \mapsto [1,0],
@@ -96,7 +101,7 @@ t \mapsto [1,0],
 u \mapsto [0,1].
 ```
 
-The model reads from the final query. Since the final token is $u$, the final
+_jmac Give some additional information so that readers who understand attention matrices can follow the explanation. jmac_ The model reads from the final query. Since the final token is $u$, the final
 query is the non-target query. Under the two-score assumption, the final-query
 score row for a positive example is
 
@@ -111,7 +116,7 @@ assigned to every non-target key. Define the margin
 \Delta=a-b.
 ```
 
-Before the softmax, the model applies a score multiplier $\alpha$. The target
+Before the softmax, the model applies a score multiplier $\alpha$. _jmac Explain that this Could be a learned constant or could be a function of n With hyperparameters learned by our model. You need to convey to the that this is an important difference to the way attention is normally learned and calculated -- and this is the central change to the usual setup that we are using in our investigation. jmac_ The target
 attention mass is
 
 ```math
@@ -247,6 +252,8 @@ All analyzed runs train at length 10 and evaluate up to length 10,000,000. Long
 evaluation is chunked to avoid materializing the full evaluation tensor at once.
 The analyzed runs are:
 
+_jmac Don't include the directory names here. Explain the labels you will be using on later figures. jmac_
+
 ```text
 runs/stage3base/constant_e50
 runs/stage3base/constant_e100
@@ -285,6 +292,7 @@ error.
 This validation step is central to the report. It shows that the theory is not
 being applied after the fact to an unrelated black-box model. The trained model
 learns the exact score structure required by the simplified analysis.
+_jmac I think this is overstated. This is really just a debugging step. After all, we have only two tokens, so only two scores can be learned. It is not at all surprising that the error is zero except for tiny numerical deviations. jmac_
 
 ## Results
 
@@ -307,14 +315,22 @@ Table 1 summarizes the main results at evaluation length 10,000,000.
 | `learned_log_e100` | 3200 | 7.9306 | 0.0961 | 0.7623 | 0.9837 | 4.8629 | 1.0000 |
 | `learned_log_e200` | 6400 | 8.2994 | 0.1352 | 1.1218 | 1.0000 | 6.8194 | 1.0000 |
 
-![Target attention by length](../infinite_generalization/documents/figures/stage3_target_attention_by_length.png)
+_jmac Explain what the updates column means. Use fewer decimal places for most of this. jmac_
+
+
+![Target attention by length](figures/stage3_target_attention_by_length.png)
+_jmac fixed path jmac_
 
 **Figure 1:** Target attention as a function of evaluation length. Constant
 scaling eventually dilutes target mass. Fixed log scaling succeeds because the
 learned margin is above 1. Learned-log behavior depends on whether optimization
 pushes $c\Delta$ above 1.
 
-![Positive logit by length](../infinite_generalization/documents/figures/stage3_positive_logit_by_length.png)
+_jmac In the figures, fix the graph titles so that they do not refer to stage 3, jmac_
+
+
+![Positive logit by length](figures/stage3_positive_logit_by_length.png)
+_jmac fixed path jmac_
 
 **Figure 2:** Positive logit as a function of evaluation length. Positive
 accuracy fails when the target attention mass moves past the classifier's
@@ -340,7 +356,7 @@ failure for any finite fixed margin.
 
 ### Fixed Log Scaling
 
-The fixed-log run uses $\alpha=\log n$. The learned margin is
+The fixed-log run uses $\alpha=\log n$. The learned margin is _jmac Use fewer decimal places here and elsewhere. jmac_
 $\Delta\approx3.9361$, comfortably above the threshold $\Delta>1$. Therefore the
 theory predicts $p_t(n)\to1$, which is exactly what is observed. Target
 attention reaches 1.0000 at long lengths, the positive logit remains positive,
