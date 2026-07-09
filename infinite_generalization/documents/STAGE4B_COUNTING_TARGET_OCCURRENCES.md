@@ -602,9 +602,45 @@ model receives little or no useful gradient signal to raise target scores into t
 
 This ablation therefore does not show that a top-k denominator is impossible in principle. It
 shows that hard top-k selection is not trainable from this cold start in the current reduced
-model. A fairer test would likely need a differentiable warm-up path, such as full-softmax
-pretraining followed by top-k fine-tuning, a ranking auxiliary loss, or a soft top-k relaxation
-before switching to hard top-k.
+model. This motivated a short warm-start check using full-softmax checkpoints as the score-side
+initialization before switching to hard top-k.
+
+## Warm-Start Top-K Check
+
+The warm-start variant was designed as a training-time repair for the cold-start ranking
+problem. First, a normally trained `softmax_mass` Stage 4B checkpoint was used as the source
+model. Then a new model with `readout_mode = topk_softmax_mass` and `top_k = 3` was
+initialized by copying only the score-side parameters from that source checkpoint:
+
+```text
+query_projection
+key_projection
+alpha_log_scale_unconstrained
+```
+
+The count classifier was reinitialized and trained from scratch under the hard top-k readout.
+This made the diagnostic narrower: the copied score-side parameters provided an initial
+target-over-non-target ranking, while the new classifier tested whether restricted top-k mass
+could learn count thresholds once that ranking was available. In other words, this was not an
+inference-only denominator patch; it still placed hard top-k inside the fine-tuning objective.
+
+The seed-42 warm-start run still failed at the balanced floor. The final model again excluded
+targets from the selected subset, predicted count 0 for every example, and reached `0.250`
+accuracy at both train length and 10M.
+
+A one-seed rerun with seed 43 changed the failure shape but did not solve the task:
+
+| Warm-start seed | Modes | Accuracy @ train length | Accuracy @ 10M | Mean top-k target recall @ 10M | Dominant prediction |
+|---|---|---:|---:|---:|---|
+| 42 | `constant`, `log`, `learned_log` | 0.250 | 0.250 | 0.0 | all examples predict 0 |
+| 43 | `constant`, `log`, `learned_log` | 0.500 | 0.500 | 1.0 | true 0 predicts 0; true 1, 2, 3 predict 2 |
+
+Seed 43 shows that warm start can sometimes preserve the target-over-non-target ranking: all
+target positions enter the top-k subset. However, the restricted softmax then saturates into a
+binary positive-vs-none signal. Positive examples have nearly all mass on the target side, so
+counts 1, 2, and 3 become hard to distinguish and collapse to the same predicted count. The
+warm-start result therefore separates two top-k failure modes: seed 42 is still a ranking
+failure, while seed 43 becomes a readout-saturation failure.
 
 ## Current Conclusion
 
@@ -626,8 +662,8 @@ More importantly, Stage 4B suggests that exact counting is not solved by simply 
 Stage 3/4A target-presence mechanism stronger. Counting needs either a calibrated critical
 regime or a representation that preserves count-like information more directly without also
 introducing an uncontrolled length-growing background scale. The top-k ablation also shows
-that bounding the denominator is not enough if the model cannot first learn the correct
-target-over-non-target ranking.
+that bounding the denominator is not enough: without a stable ranking it excludes targets, and
+with a preserved ranking it can still saturate into a binary positive detector.
 
 ## Limitations And Next Steps
 
@@ -649,14 +685,16 @@ The follow-up ablations now separate several mechanisms:
   non-target numerator creates a length-growing background feature,
 - the target-numerator-only readout confirms that the constant target numerator is a stable
   count signal when isolated from that background,
-- the hard top-k readout fails by cold-start ranking failure because target tokens never enter
-  the selected subset.
+- the hard top-k readout fails by cold-start ranking failure when target tokens never enter the
+  selected subset, while a warm-started seed check can instead fail by saturating all positive
+  counts into the same target-heavy readout.
 
 Minimal candidates are:
 
 - add denominator or log-denominator information to explicitly normalize the length-growing
   background,
-- warm-start top-k from a full-softmax checkpoint or add an explicit ranking loss,
+- freeze or regularize the warm-started scorer, add explicit count calibration, or use a soft
+  top-k relaxation before hard selection,
 - compare against a parallel detector followed by sum pooling.
 
 Those variants should be treated as diagnostic ablations, not as replacements for the main
