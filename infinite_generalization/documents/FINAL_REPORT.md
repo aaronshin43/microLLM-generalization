@@ -18,7 +18,7 @@ learned model. The experiments show three regimes. A constant multiplier
 improves with more training but fails asymptotically. A fixed-log multiplier
 succeeds when $\Delta>1$. A learned-log multiplier succeeds only after
 optimization pushes the effective product $c\Delta$ above 1. Thus, passing a
-finite long-sequence evaluation is not sufficient evidence of infinite-length
+finite long-sequence evaluation is not sufficient evidence of infinite-length _jmac_ We may want to refer to unbounded length rather than infinite length _jmac_
 generalization; the effective margin must grow faster than the softmax
 denominator.
 
