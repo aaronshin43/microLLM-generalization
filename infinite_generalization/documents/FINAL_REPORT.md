@@ -40,15 +40,13 @@ The task uses a two-token vocabulary:
 - $t$: target token
 - $u$: non-target token
 
-A positive length-$n$ sequence contains one target token and $n-1$ non-target
-tokens. The model has no positional encoding, so its attention mechanism is
-position-independent: permuting the first $n-1$ tokens does not change the
-output. We put the target token in the first position only to make the sequence
-notation easier to read; any non-last position is equivalent. The last token is
-always required to be the non-target token $u$ so that positive and negative
-examples use the same readout query.
-
-_jmac Mention that we will be using a position-independent attention mechanism so the order of the tokens is irrelevant, except for the final target in the sequence which must be a non-target for this simple analysis. jmac_ 
+A positive length-$n$ sequence, with $n\geq2$, contains one target token and
+$n-1$ non-target tokens. The token in the last position is always the
+non-target token $u$, so positive and negative examples use the same readout
+query. The model has no positional encoding, so permuting the tokens among the
+first $n-1$ positions does not change its output. We place the target in the
+first position only to make the notation easier to read; any position other
+than the last is equivalent.
 
 ```text
 t, u, u, ..., u
@@ -60,12 +58,14 @@ A negative length-$n$ sequence contains only non-target tokens:
 u, u, u, ..., u
 ```
 
-The model begins with fixed one-hot token embeddings for $t$ and $u$. To
-produce attention scores, these token embeddings are passed through learned
-query and key projections. In the value pathway, the same one-hot embeddings
-are used directly as fixed attention values, with no learned value projection.
+At a high level, the query at the last position scores every token in the
+sequence, softmax converts those scores into attention weights, and the
+weighted sum of the token values is passed to a binary classifier.
 
-_jmac token embeddings??? jmac_
+The model begins with fixed one-hot representations for $t$ and $u$. Learned
+query and key projections produce the attention scores. In the value pathway,
+the same one-hot representations are used directly, with no learned value
+projection:
 
 ```math
 t \mapsto [1,0],
@@ -73,104 +73,116 @@ t \mapsto [1,0],
 u \mapsto [0,1].
 ```
 
-_jmac Give some additional information so that readers who understand attention matrices can follow the explanation. jmac_
-
-For a sequence represented by the one-hot embedding matrix $X$, the learned
-projections produce $Q=XW_Q$ and $K=XW_K$. Conventional self-attention forms
-the full $n\times n$ score matrix $QK^\top/\sqrt d$, where row $i$ contains the
-scores between the query at position $i$ and the key at every sequence
-position. This classifier makes its prediction using only the query at the last
-position. It therefore computes only the scores between that query and all
-$n$ keys:
+This fixed value pathway makes the output directly record how much total
+attention is assigned to each token type. For a sequence represented by the
+one-hot matrix $X$, the learned projections produce $Q=XW_Q$ and $K=XW_K$.
+Conventional self-attention forms the full $n\times n$ score matrix
+$QK^\top/\sqrt d$. This reduced classifier uses only the query at the last
+position and therefore needs only its scores against the $n$ keys:
 
 ```math
 s_j=\frac{q_{\mathrm{last}}^\top k_j}{\sqrt d},
 \qquad j=1,\ldots,n.
 ```
 
-Since the last token is $u$, $q_{\mathrm{last}}$ is the same non-target query
-$q_u$ for every example. With one target token type and one non-target token
-type, the resulting score vector for a positive example has the form
+Here $d$ is the query and key dimension. Since the token in the last position
+is $u$, $q_{\mathrm{last}}=q_u$ for every example. The target and non-target
+scores are therefore
+
+```math
+a=\frac{q_u^\top k_t}{\sqrt d},
+\qquad
+b=\frac{q_u^\top k_u}{\sqrt d}.
+```
+
+The architecture thus fixes the score vector of a positive example to the form
 
 ```math
 S_n=(a,b,b,\ldots,b),
 ```
 
-where $a$ is the score assigned to the target key and $b$ is the shared score assigned to every non-target key. Define the margin
+while training determines the values of $a$ and $b$. Define the target score
+margin as
 
 ```math
 \Delta=a-b.
 ```
 
-Reading out only the last query, under ordinary softmax attention its weight on
-position $j$ is
+The central change in this study is an additional score multiplier
+$\alpha(n)$ applied before softmax. The attention weight on position $j$ is
 
 ```math
-A_j=\frac{e^{s_j}}{\sum_{k=1}^{n} e^{s_k}}.
+A_j
+=
+\frac{e^{\alpha(n)s_j}}
+{\sum_{k=1}^{n}e^{\alpha(n)s_k}}.
 ```
 
-With the score row $S_n=(a,b,\ldots,b)$, the weight on the single target key is
+Standard scaled dot-product attention corresponds to $\alpha(n)=1$ here,
+because the usual $1/\sqrt d$ factor is already included in $s_j$. The
+length-aware variants instead make $\alpha(n)$ a fixed or learned function of
+the sequence length. This additional multiplier is the main departure from the
+usual attention computation.
 
-```math
-p_t(n)=\frac{e^{a}}{e^{a}+(n-1)e^{b}}.
-```
-
-The central change in this study is a length-dependent multiplier $\alpha$ that
-rescales the whole score row before the softmax, replacing $s_j$ with
-$\alpha s_j$. In standard scaled dot-product attention the only fixed rescaling
-is the $1/\sqrt d$ factor, with all other score magnitudes learned through
-$W_Q$ and $W_K$. Here we additionally multiply the entire row by $\alpha$, which
-may be a constant or a function of the sequence length $n$ with learned
-parameters. This is the key departure from the usual attention computation. The
-constant baseline $\alpha=1$ recovers ordinary softmax attention, while the log
-and learned-log modes are the length-aware modifications.
-
-_jmac Explain that this Could be a learned constant or could be a function of n With hyperparameters learned by our model. You need to convey to the that this is an important difference to the way attention is normally learned and calculated -- and this is the central change to the usual setup that we are using in our investigation. jmac_
-
-With the multiplier, the target attention mass becomes
+For the positive score vector $S_n=(a,b,\ldots,b)$, the attention mass on the
+single target key is
 
 ```math
 p_t(n)
 =
-\frac{e^{\alpha a}}
-{e^{\alpha a}+(n-1)e^{\alpha b}}.
+\frac{e^{\alpha(n)a}}
+{e^{\alpha(n)a}+(n-1)e^{\alpha(n)b}}.
 ```
 
-Dividing numerator and denominator by $e^{\alpha b}$ gives the closed form
+Dividing the numerator and denominator by $e^{\alpha(n)b}$ gives the closed
+form
 
 ```math
 p_t(n)
 =
-\frac{e^{\alpha\Delta}}
-{e^{\alpha\Delta}+(n-1)}.
+\frac{e^{\alpha(n)\Delta}}
+{e^{\alpha(n)\Delta}+(n-1)}.
 ```
 
-The classifier reads the attention output, the weighted sum of the value
-vectors,
+The classifier reads the weighted sum of the fixed value vectors:
 
 ```math
-o(n)=\sum_{j=1}^{n} A_j x_j,
+o(n)=\sum_{j=1}^{n} A_j v_j.
 ```
 
-where $A_j$ is the attention weight on position $j$. These weights sum to 1. 
-Exactly one key is the target, carrying weight $p_t(n)$, so the remaining $n-1$ non-target keys carry the
-complementary weight $1-p_t(n)$ in total. Since the target's value is $[1,0]$ and every non-target's value is the
-same vector $[0,1]$, the target weight lands entirely in the first coordinate
-and the pooled non-target weight in the second:
+On a positive example, the target carries weight $p_t(n)$ and all non-targets
+together carry the complementary weight $1-p_t(n)$. Its output is therefore
 
 ```math
-o(n)=p_t(n)\,[1,0]+\big(1-p_t(n)\big)\,[0,1]=\big(p_t(n),\,1-p_t(n)\big).
+o_{\text{pos}}(n)
+=
+p_t(n)\,[1,0]+\big(1-p_t(n)\big)\,[0,1]
+=
+\big(p_t(n),\,1-p_t(n)\big).
 ```
 
-The output is thus a convex combination of target evidence $[1,0]$ and
-non-target evidence $[0,1]$, governed by the single scalar $p_t(n)$. Detecting
-the target reduces to keeping $p_t(n)$ large enough at every length, so the
-length-generalization question is precisely whether $p_t(n)$ stays high as
-$n\to\infty$.
+A negative example contains only $u$, so its output is always
+
+```math
+o_{\text{neg}}(n)=[0,1].
+```
+
+The positive output is thus governed by the single scalar $p_t(n)$. If
+$p_t(n)\to0$, the positive representation converges to the negative
+representation, and the representation margin between the two classes
+vanishes. If $p_t(n)$ converges to a constant strictly between 0 and 1,
+classification depends on the learned classifier's decision boundary. The
+stronger, target-dominant outcome is $p_t(n)\to1$. The conditions below
+distinguish these three cases.
 
 ### Length-Scaling Regimes
 
-The denominator term $(n-1)$ is the source of length dependence. If $\alpha=1$, then
+Assume that $\Delta>0$, so the target has a score advantage over each
+non-target. If $\Delta\leq0$, none of the positive multipliers considered below
+can create such an advantage. The competing term $(n-1)$ is the source of
+length dependence.
+
+For the constant baseline $\alpha(n)=1$,
 
 ```math
 p_t(n)
@@ -181,9 +193,12 @@ p_t(n)
 \text{as } n\to\infty.
 ```
 
-A fixed margin can beat each non-target token individually, but it cannot beat an unbounded number of non-target competitors.
+A fixed margin can beat each non-target token individually, but it cannot beat
+an unbounded number of non-target competitors. Consequently,
+$o_{\text{pos}}(n)\to[0,1]$, the same representation as
+$o_{\text{neg}}(n)$.
 
-If $\alpha=\log n$, then
+For the fixed-log multiplier $\alpha(n)=\log n$,
 
 ```math
 p_t(n)
@@ -191,38 +206,77 @@ p_t(n)
 \frac{n^\Delta}{n^\Delta+n-1}.
 ```
 
-The limit as $n\to\infty$ depends only on the margin: if $\Delta>1$ the target
-mass tends to 1; if $\Delta=1$ it tends to $\tfrac12$; and if $0<\Delta<1$ it
-tends to 0. A log multiplier therefore succeeds only when the learned margin
-exceeds 1.
+The limit depends on the learned margin:
+
+```math
+\lim_{n\to\infty}p_t(n)
+=
+\begin{cases}
+1, & \Delta>1,\\
+\tfrac12, & \Delta=1,\\
+0, & 0<\Delta<1.
+\end{cases}
+```
+
+Thus, $\Delta>1$ is the exact condition for target attention to converge to 1,
+while $0<\Delta<1$ causes the positive representation to collapse onto the
+negative representation. At the boundary $\Delta=1$, the two representations
+remain distinct, and classification depends on the learned decision boundary.
 
 For the learned-log multiplier used in the experiments,
 
 ```math
-\alpha=1+c\log(1+n),
+\alpha(n)=1+c\log(1+n),
 ```
 
-the asymptotic condition is approximately
+the target attention mass is
 
 ```math
-c\Delta>1.
+p_t(n)
+=
+\frac{e^\Delta(1+n)^{c\Delta}}
+{e^\Delta(1+n)^{c\Delta}+(n-1)}.
 ```
 
-A single general condition summarizes these cases. Rewriting the target
+Its limit is
+
+```math
+\lim_{n\to\infty}p_t(n)
+=
+\begin{cases}
+1, & c\Delta>1,\\
+\dfrac{e^\Delta}{e^\Delta+1}, & c\Delta=1,\\
+0, & c\Delta<1.
+\end{cases}
+```
+
+Therefore, $c\Delta>1$ is the exact condition for target attention to
+converge to 1. The equality case again has a nonzero limiting target mass and
+depends on the classifier's decision boundary, whereas $c\Delta<1$ produces
+asymptotic collapse.
+
+A single general condition summarizes all three regimes. Rewriting the target
 attention mass as
 
 ```math
-p_t(n)=\frac{1}{1+(n-1)e^{-\alpha\Delta}},
+p_t(n)
+=
+\frac{1}
+{1+\exp\!\left(\log(n-1)-\alpha(n)\Delta\right)},
 ```
 
-target attention converges to 1 exactly when the non-target ratio
-$(n-1)e^{-\alpha\Delta}\to0$, that is, when
+and defining
 
 ```math
-\alpha\Delta-\log n\to+\infty.
+g(n)=\alpha(n)\Delta-\log(n-1),
 ```
 
-The scaled target margin must grow faster than the logarithm of the number of competing non-target keys.
+shows that $g(n)$ fully determines the asymptotic target mass: $p_t(n)\to1$
+when $g(n)\to+\infty$, $p_t(n)\to0$ when $g(n)\to-\infty$, and
+$p_t(n)\to1/(1+e^{-L})$ when $g(n)\to L$ for some finite $L$. Target-dominant
+attention therefore requires
+the scaled target margin to exceed the logarithm of the number of competing
+non-target keys by an amount that grows without bound.
 
 ## Experimental Design
 
