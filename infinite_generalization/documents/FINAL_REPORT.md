@@ -3,72 +3,33 @@
 ## Abstract
 
 _jmac Don't use so much detailed technical notation and definitions in the abstract. Try to describe the conclusion and findings in prose rather than symbols and formulas. jmac_ 
-Softmax attention classifiers trained on short sequences can fail to generalize
-to much longer sequences, even on simple target-token detection tasks. This
-report studies that failure mode in a deliberately reduced binary attention
-classifier. The model sees sequences containing either one target token or only
-non-target tokens, and a single final query attends over the sequence before a
-binary classifier makes the prediction. We compare constant, fixed-log, and
-learned-log score multipliers to test when length-aware attention scaling
-overcomes the growing softmax denominator. Let $\Delta$ denote the score margin
-between the target and non-target tokens, and let $c$ denote the learned
-coefficient in the learned-log multiplier. The trained model satisfies the
-two-score assumption: one target score and one shared non-target score.
-Therefore, the closed-form target-attention equation accurately describes the
-learned model. The experiments show three regimes. A constant multiplier
-improves with more training but fails asymptotically. A fixed-log multiplier
-succeeds when $\Delta>1$. A learned-log multiplier succeeds only after
-optimization pushes the effective product $c\Delta$ above 1. Thus, passing a
-finite long-sequence evaluation is not sufficient evidence of infinite-length _jmac We may want to refer to unbounded length rather than infinite length jmac_
-generalization; the effective margin must grow faster than the softmax
+Softmax attention classifiers trained on short sequences can fail to generalize to much longer sequences, even on simple target-token detection tasks. This report studies that failure mode in a deliberately reduced binary attention classifier. The model sees sequences containing either one target token or only non-target tokens, and a single final query attends over the sequence before a binary classifier makes the prediction. We compare constant, fixed-log, and learned-log score multipliers to test when length-aware attention scaling overcomes the growing softmax denominator. Let $\Delta$ denote the score margin between the target and non-target tokens, and let $c$ denote the learned coefficient in the learned-log multiplier. The trained model satisfies the two-score assumption: one target score and one shared non-target score. Therefore, the closed-form target-attention equation accurately describes the learned model. The experiments show three regimes. A constant multiplier improves with more training but fails asymptotically. A fixed-log multiplier succeeds when $\Delta>1$. A learned-log multiplier succeeds only after optimization pushes the effective product $c\Delta$ above 1. Thus, passing a finite long-sequence evaluation is not sufficient evidence of infinite-length _jmac We may want to refer to unbounded length rather than infinite length jmac_ generalization; the effective margin must grow faster than the softmax
 denominator.
 
 ## Introduction
 
 _jmac A similar comment to the abstract. This introduction introduces too much technical detail that is not explained. The reader cannot understand the issue with the softmax denominator until the model is more clear. Add some additional explanation here but leave the technical details until later.  jmac_ 
-Length generalization is a basic difficulty for sequence models. A classifier can
-fit short training sequences while relying on a mechanism that does not remain
-valid at longer sequence lengths. This problem appears even in simple
-existential target-token tasks, where the model only needs to decide whether a
-sequence contains a particular token.
+Length generalization is a basic difficulty for sequence models. A classifier can fit short training sequences while relying on a mechanism that does not remain valid at longer sequence lengths. This problem appears even in simple existential target-token tasks, where the model only needs to decide whether a sequence contains a particular token.
 
-The motivating failure mode is attention dilution. If one target token competes
-against many non-target tokens in a softmax denominator, a fixed target advantage
-over each individual non-target token may still become too weak as the number of
-non-target tokens grows. This suggests a simple theoretical question: can
-length-aware attention scaling make the target advantage grow quickly enough to
-overcome the length-growing denominator?
+The motivating failure mode is attention dilution. If one target token competes against many non-target tokens in a softmax denominator, a fixed target advantage over each individual non-target token may still become too weak as the number of non-target tokens grows. This suggests a simple theoretical question: can length-aware attention scaling make the target advantage grow quickly enough to overcome the length-growing denominator?
 
-This report focuses on a reduced binary classifier proposed for that question.
-The model is intentionally much simpler than a full transformer. It uses fixed
-one-hot token values, learned query and key projections, a single final-query
-attention readout, and a binary classifier. The goal is not to show that this
-model is a competitive architecture. The goal is to test whether the simplified
-closed-form attention theory correctly describes a trainable model in the
-controlled setting where its assumptions can be directly checked.
+This report focuses on a reduced binary classifier proposed for that question. The model is intentionally much simpler than a full transformer. It uses fixed one-hot token values, learned query and key projections, a single final-query attention readout, and a binary classifier. The goal is not to show that this model is a competitive architecture. The goal is to test whether the simplified closed-form attention theory correctly describes a trainable model in the controlled setting where its assumptions can be directly checked.
 
-The main result is that the reduced model does satisfy the required two-score
-structure after training. On positive examples, the final-query attention scores
-take the form
+The main result is that the reduced model does satisfy the required two-score structure after training. On positive examples, the final-query attention scores take the form
 
 ```math
 S_n=(a,b,b,\ldots,b),
 ```
 
-where $a$ is the target score, $b$ is the shared non-target score, and
-$\Delta=a-b$. Once this structure holds, the target attention mass is determined
-by
+where $a$ is the target score, $b$ is the shared non-target score, and $\Delta=a-b$. Once this structure holds, the target attention mass is determined by
 
 ```math
 p_t(n)=\frac{e^{\alpha\Delta}}{e^{\alpha\Delta}+(n-1)}.
 ```
 
-The experiments then behave as the theory predicts. Constant attention scaling
-fails at long length. Fixed log-length scaling succeeds when the learned margin
-is larger than 1. Learned log-length scaling succeeds asymptotically only after
-training makes $c\Delta>1$. This last point is important: a model can pass a
-finite evaluation length such as 10 million while still being predicted to fail
-at much larger lengths if $c\Delta<1$.
+The experiments then behave as the theory predicts. Constant attention scaling fails at long length. Fixed log-length scaling succeeds when the learned margin
+is larger than 1. Learned log-length scaling succeeds asymptotically only after training makes $c\Delta>1$. This last point is important: a model can pass a
+finite evaluation length such as 10 million while still being predicted to fail at much larger lengths if $c\Delta<1$.
 
 _jmac Please add a related work section. This can be based on a single piece of literature if desired. See the instructions on "Related Work" at https://dnulab.org/internal/report-guidelines jmac_
 
@@ -79,9 +40,15 @@ The task uses a two-token vocabulary:
 - $t$: target token
 - $u$: non-target token
 
-A positive length-$n$ sequence has one target token followed by non-target
+A positive length-$n$ sequence contains one target token and $n-1$ non-target
+tokens. The model has no positional encoding, so its attention mechanism is
+position-independent: permuting the first $n-1$ tokens does not change the
+output. We put the target token in the first position only to make the sequence
+notation easier to read; any non-last position is equivalent. The last token is
+always required to be the non-target token $u$ so that positive and negative
+examples use the same readout query.
+
 _jmac Mention that we will be using a position-independent attention mechanism so the order of the tokens is irrelevant, except for the final target in the sequence which must be a non-target for this simple analysis. jmac_ 
-tokens: 
 
 ```text
 t, u, u, ..., u
@@ -93,7 +60,12 @@ A negative length-$n$ sequence contains only non-target tokens:
 u, u, u, ..., u
 ```
 
-The values _jmac token embeddings??? jmac_ are fixed one-hot vectors:
+The model begins with fixed one-hot token embeddings for $t$ and $u$. To
+produce attention scores, these token embeddings are passed through learned
+query and key projections. In the value pathway, the same one-hot embeddings
+are used directly as fixed attention values, with no learned value projection.
+
+_jmac token embeddings??? jmac_
 
 ```math
 t \mapsto [1,0],
@@ -101,23 +73,61 @@ t \mapsto [1,0],
 u \mapsto [0,1].
 ```
 
-_jmac Give some additional information so that readers who understand attention matrices can follow the explanation. jmac_ The model reads from the final query. Since the final token is $u$, the final
-query is the non-target query. Under the two-score assumption, the final-query
-score row for a positive example is
+_jmac Give some additional information so that readers who understand attention matrices can follow the explanation. jmac_
+
+For a sequence represented by the one-hot embedding matrix $X$, the learned
+projections produce $Q=XW_Q$ and $K=XW_K$. Conventional self-attention forms
+the full $n\times n$ score matrix $QK^\top/\sqrt d$, where row $i$ contains the
+scores between the query at position $i$ and the key at every sequence
+position. This classifier makes its prediction using only the query at the last
+position. It therefore computes only the scores between that query and all
+$n$ keys:
+
+```math
+s_j=\frac{q_{\mathrm{last}}^\top k_j}{\sqrt d},
+\qquad j=1,\ldots,n.
+```
+
+Since the last token is $u$, $q_{\mathrm{last}}$ is the same non-target query
+$q_u$ for every example. With one target token type and one non-target token
+type, the resulting score vector for a positive example has the form
 
 ```math
 S_n=(a,b,b,\ldots,b),
 ```
 
-where $a$ is the score assigned to the target key and $b$ is the shared score
-assigned to every non-target key. Define the margin
+where $a$ is the score assigned to the target key and $b$ is the shared score assigned to every non-target key. Define the margin
 
 ```math
 \Delta=a-b.
 ```
 
-Before the softmax, the model applies a score multiplier $\alpha$. _jmac Explain that this Could be a learned constant or could be a function of n With hyperparameters learned by our model. You need to convey to the that this is an important difference to the way attention is normally learned and calculated -- and this is the central change to the usual setup that we are using in our investigation. jmac_ The target
-attention mass is
+Reading out only the last query, under ordinary softmax attention its weight on
+position $j$ is
+
+```math
+A_j=\frac{e^{s_j}}{\sum_{k=1}^{n} e^{s_k}}.
+```
+
+With the score row $S_n=(a,b,\ldots,b)$, the weight on the single target key is
+
+```math
+p_t(n)=\frac{e^{a}}{e^{a}+(n-1)e^{b}}.
+```
+
+The central change in this study is a length-dependent multiplier $\alpha$ that
+rescales the whole score row before the softmax, replacing $s_j$ with
+$\alpha s_j$. In standard scaled dot-product attention the only fixed rescaling
+is the $1/\sqrt d$ factor, with all other score magnitudes learned through
+$W_Q$ and $W_K$. Here we additionally multiply the entire row by $\alpha$, which
+may be a constant or a function of the sequence length $n$ with learned
+parameters. This is the key departure from the usual attention computation. The
+constant baseline $\alpha=1$ recovers ordinary softmax attention, while the log
+and learned-log modes are the length-aware modifications.
+
+_jmac Explain that this Could be a learned constant or could be a function of n With hyperparameters learned by our model. You need to convey to the that this is an important difference to the way attention is normally learned and calculated -- and this is the central change to the usual setup that we are using in our investigation. jmac_
+
+With the multiplier, the target attention mass becomes
 
 ```math
 p_t(n)
@@ -126,30 +136,41 @@ p_t(n)
 {e^{\alpha a}+(n-1)e^{\alpha b}}.
 ```
 
-Dividing by $e^{\alpha b}$ gives the closed form
+Dividing numerator and denominator by $e^{\alpha b}$ gives the closed form
 
 ```math
 p_t(n)
 =
 \frac{e^{\alpha\Delta}}
-{e^{\alpha\Delta}+(n-1)}
-=
-\frac{1}{1+(n-1)e^{-\alpha\Delta}}.
+{e^{\alpha\Delta}+(n-1)}.
 ```
 
-The attention output is then
+The classifier reads the attention output, the weighted sum of the value
+vectors,
 
 ```math
-o(n)=(p_t(n),1-p_t(n)).
+o(n)=\sum_{j=1}^{n} A_j x_j,
 ```
 
-Thus the output is a convex combination of target evidence and non-target
-evidence.
+where $A_j$ is the attention weight on position $j$. These weights sum to 1. 
+Exactly one key is the target, carrying weight $p_t(n)$, so the remaining $n-1$ non-target keys carry the
+complementary weight $1-p_t(n)$ in total. Since the target's value is $[1,0]$ and every non-target's value is the
+same vector $[0,1]$, the target weight lands entirely in the first coordinate
+and the pooled non-target weight in the second:
+
+```math
+o(n)=p_t(n)\,[1,0]+\big(1-p_t(n)\big)\,[0,1]=\big(p_t(n),\,1-p_t(n)\big).
+```
+
+The output is thus a convex combination of target evidence $[1,0]$ and
+non-target evidence $[0,1]$, governed by the single scalar $p_t(n)$. Detecting
+the target reduces to keeping $p_t(n)$ large enough at every length, so the
+length-generalization question is precisely whether $p_t(n)$ stays high as
+$n\to\infty$.
 
 ### Length-Scaling Regimes
 
-The denominator term $(n-1)$ is the source of length dependence. If
-$\alpha=1$, then
+The denominator term $(n-1)$ is the source of length dependence. If $\alpha=1$, then
 
 ```math
 p_t(n)
@@ -160,8 +181,7 @@ p_t(n)
 \text{as } n\to\infty.
 ```
 
-A fixed margin can beat each non-target token individually, but it cannot beat
-an unbounded number of non-target competitors.
+A fixed margin can beat each non-target token individually, but it cannot beat an unbounded number of non-target competitors.
 
 If $\alpha=\log n$, then
 
@@ -171,15 +191,10 @@ p_t(n)
 \frac{n^\Delta}{n^\Delta+n-1}.
 ```
 
-Therefore
-
-```math
-\Delta>1 \Rightarrow p_t(n)\to1,
-\qquad
-\Delta=1 \Rightarrow p_t(n)\to\frac12,
-\qquad
-0<\Delta<1 \Rightarrow p_t(n)\to0.
-```
+The limit as $n\to\infty$ depends only on the margin: if $\Delta>1$ the target
+mass tends to 1; if $\Delta=1$ it tends to $\tfrac12$; and if $0<\Delta<1$ it
+tends to 0. A log multiplier therefore succeeds only when the learned margin
+exceeds 1.
 
 For the learned-log multiplier used in the experiments,
 
@@ -193,25 +208,31 @@ the asymptotic condition is approximately
 c\Delta>1.
 ```
 
-A single general condition summarizes these cases. Target attention converges to
-1 when
+A single general condition summarizes these cases. Rewriting the target
+attention mass as
+
+```math
+p_t(n)=\frac{1}{1+(n-1)e^{-\alpha\Delta}},
+```
+
+target attention converges to 1 exactly when the non-target ratio
+$(n-1)e^{-\alpha\Delta}\to0$, that is, when
 
 ```math
 \alpha\Delta-\log n\to+\infty.
 ```
 
-The scaled target margin must grow faster than the logarithm of the number of
-competing non-target keys.
+The scaled target margin must grow faster than the logarithm of the number of competing non-target keys.
 
 ## Experimental Design
 
-The experiment implements the simplified model as a trainable reduced attention
-classifier. It uses:
+The experiment implements the simplified model as a trainable reduced attention classifier. It uses:
 
-- fixed one-hot token values $t\mapsto[1,0]$ and $u\mapsto[0,1]$
+- one-hot token inputs
+- fixed semantic value vectors $t\mapsto[1,0]$ and $u\mapsto[0,1]$
 - learned query projection $W_Q$
 - learned key projection $W_K$
-- a final-token query only
+- a last-token query only
 - softmax attention over all sequence positions
 - a binary classifier on the attention output
 
@@ -231,8 +252,7 @@ s_j
 \frac{q_{\mathrm{last}}^\top k_j}{\sqrt d}.
 ```
 
-The multiplier $\alpha$ is then applied before softmax. The experiments compare
-three multiplier modes:
+The multiplier $\alpha$ is then applied before softmax. The experiments compare three multiplier modes:
 
 | Mode | Multiplier |
 |---|---|
@@ -248,33 +268,22 @@ c=\mathrm{softplus}(k_\alpha),
 
 so it remains positive during optimization.
 
-All analyzed runs train at length 10 and evaluate up to length 10,000,000. Long
-evaluation is chunked to avoid materializing the full evaluation tensor at once.
-The analyzed runs are:
+All analyzed runs train at length 10 and evaluate up to length 10,000,000. Long evaluation is chunked to avoid materializing the full evaluation tensor at once.
 
 _jmac Don't include the directory names here. Explain the labels you will be using on later figures. jmac_
 
-```text
-runs/stage3base/constant_e50
-runs/stage3base/constant_e100
-runs/stage3base/constant_e1000
-runs/stage3base/log_e50
-runs/stage3base/learned_log_e50
-runs/stage3base/learned_log_e100
-runs/stage3base/learned_log_e200
-```
+Run labels combine the multiplier mode with the training budget. For example,
+`constant_e50` denotes constant scaling trained for 50 epochs, while
+`learned_log_e200` denotes learned-log scaling trained for 200 epochs. We
+analyze constant runs at 50, 100, and 1000 epochs; one fixed-log run at 50
+epochs; and learned-log runs at 50, 100, and 200 epochs. These compact labels
+are used in Table 1 and both figures below.
 
-The suffix `e50`, for example, denotes a 50-epoch training run.
+## Closed-Form Consistency Check
 
-## Assumption Validation
+The closed-form expression for $p_t(n)$ is exact only if the two-score assumption holds. Therefore, the first empirical question is not whether the formula can be algebraically derived. The first empirical question is whether the trained model actually produces one target score and one shared non-target score.
 
-The closed-form expression for $p_t(n)$ is exact only if the two-score
-assumption holds. Therefore, the first empirical question is not whether the
-formula can be algebraically derived. The first empirical question is whether
-the trained model actually produces one target score and one shared non-target
-score.
-
-The answer is yes in all analyzed Stage 3 runs. The non-target score standard
+As expected from the two-token construction, the non-target score standard
 deviation is 0.0 at every evaluated length. The reconstructed closed-form
 attention mass also matches the empirical attention mass up to small numerical
 error.
@@ -289,99 +298,76 @@ error.
 | `learned_log_e100` | 0.0 | about $1.5\times10^{-5}$ | holds |
 | `learned_log_e200` | 0.0 | about $1.2\times10^{-7}$ | holds |
 
-This validation step is central to the report. It shows that the theory is not
-being applied after the fact to an unrelated black-box model. The trained model
-learns the exact score structure required by the simplified analysis.
+Because the vocabulary has only two token identities and no positional
+encoding, this agreement is expected rather than a separate empirical finding.
+The check primarily verifies that the implementation, metric extraction, and
+closed-form calculation are consistent before the formula is used to interpret
+the longer-length results.
 _jmac I think this is overstated. This is really just a debugging step. After all, we have only two tokens, so only two scores can be learned. It is not at all surprising that the error is zero except for tiny numerical deviations. jmac_
 
 ## Results
 
-Negative examples are classified correctly in every analyzed run and length.
-This is expected: a negative sequence contains only non-target values, so the
-attention output remains in the non-target direction regardless of how attention
-is distributed over positions. The length-generalization failure is therefore a
-positive-example failure: the target mass in positive examples can dilute until
-the classifier no longer detects the target.
+Negative examples are classified correctly in every analyzed run and length. This is expected: a negative sequence contains only non-target values, so the attention output remains in the non-target direction regardless of how attention is distributed over positions. The length-generalization failure is therefore a positive-example failure: the target mass in positive examples can dilute until the classifier no longer detects the target.
 
-Table 1 summarizes the main results at evaluation length 10,000,000.
+Table 1 summarizes the main results at evaluation length 10,000,000. The
+`Updates` column is the total number of optimizer steps, not the number of
+training examples. With 2000 examples and batch size 64, each epoch contains 32
+updates; therefore 50, 100, 200, and 1000 epochs correspond to 1600, 3200,
+6400, and 32000 updates, respectively.
 
 | Run | Updates | $\Delta$ | Learned $c$ | $c\Delta$ | $p_t(10M)$ | Positive logit at 10M | Positive accuracy at 10M |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `constant_e50` | 1600 | 8.1006 | n/a | n/a | 0.0003 | -3.6580 | 0.0000 |
-| `constant_e100` | 3200 | 8.9883 | n/a | n/a | 0.0008 | -4.9271 | 0.0000 |
-| `constant_e1000` | 32000 | 12.2702 | n/a | n/a | 0.0209 | -18.6624 | 0.0000 |
-| `log_e50` | 1600 | 3.9361 | n/a | n/a | 1.0000 | 3.7196 | 1.0000 |
-| `learned_log_e50` | 1600 | 7.4085 | 0.0661 | 0.4894 | 0.3039 | -1.3771 | 0.0000 |
-| `learned_log_e100` | 3200 | 7.9306 | 0.0961 | 0.7623 | 0.9837 | 4.8629 | 1.0000 |
-| `learned_log_e200` | 6400 | 8.2994 | 0.1352 | 1.1218 | 1.0000 | 6.8194 | 1.0000 |
+| `constant_e50` | 1600 | 8.10 | n/a | n/a | 0.0003 | -3.66 | 0 |
+| `constant_e100` | 3200 | 8.99 | n/a | n/a | 0.0008 | -4.93 | 0 |
+| `constant_e1000` | 32000 | 12.27 | n/a | n/a | 0.021 | -18.66 | 0 |
+| `log_e50` | 1600 | 3.94 | n/a | n/a | 1.000 | 3.72 | 1 |
+| `learned_log_e50` | 1600 | 7.41 | 0.066 | 0.49 | 0.304 | -1.38 | 0 |
+| `learned_log_e100` | 3200 | 7.93 | 0.096 | 0.76 | 0.984 | 4.86 | 1 |
+| `learned_log_e200` | 6400 | 8.30 | 0.135 | 1.12 | 1.000 | 6.82 | 1 |
 
 _jmac Explain what the updates column means. Use fewer decimal places for most of this. jmac_
 
 
-![Target attention by length](figures/stage3_target_attention_by_length.png)
+![Target attention by length](./figures/final_report_target_attention_by_length.png)
 _jmac fixed path jmac_
 
-**Figure 1:** Target attention as a function of evaluation length. Constant
-scaling eventually dilutes target mass. Fixed log scaling succeeds because the
-learned margin is above 1. Learned-log behavior depends on whether optimization
-pushes $c\Delta$ above 1.
+**Figure 1:** Target attention as a function of evaluation length. Constant scaling eventually dilutes target mass. Fixed log scaling succeeds because the
+learned margin is above 1. Learned-log behavior depends on whether optimization pushes $c\Delta$ above 1.
 
 _jmac In the figures, fix the graph titles so that they do not refer to stage 3, jmac_
 
 
-![Positive logit by length](figures/stage3_positive_logit_by_length.png)
+![Positive logit by length](./figures/final_report_positive_logit_by_length.png)
 _jmac fixed path jmac_
 
-**Figure 2:** Positive logit as a function of evaluation length. Positive
-accuracy fails when the target attention mass moves past the classifier's
-decision boundary.
+**Figure 2:** Positive logit as a function of evaluation length. Positive accuracy fails when the target attention mass moves past the classifier's decision boundary.
 
 ### Constant Scaling
 
-Constant scaling uses $\alpha=1$. The observed pattern is that more training
-increases $\Delta$, which moves the failure point outward, but does not change
-the asymptotic regime. The target attention mass remains
+Constant scaling uses $\alpha=1$. The observed pattern is that more training increases $\Delta$, which moves the failure point outward, but does not change the asymptotic regime. The target attention mass remains
 
 ```math
 p_t(n)=\frac{e^\Delta}{e^\Delta+(n-1)}.
 ```
 
-For any fixed $\Delta$, $p_t(n)\to0$ as $n\to\infty$. Thus constant scaling can
-learn a stronger finite-length solution but not an infinite-length solution.
+For any fixed $\Delta$, $p_t(n)\to0$ as $n\to\infty$. Thus constant scaling can learn a stronger finite-length solution but not an infinite-length solution.
 
-This distinction is visible in the e1000 run. It learns a much larger margin
-than e50 or e100, and therefore keeps more target attention at length 10M. But
-the positive logit is still negative at 10M, and the theory predicts eventual
-failure for any finite fixed margin.
+This distinction is visible in the e1000 run. It learns a much larger margin than e50 or e100, and therefore keeps more target attention at length 10M. But the positive logit is still negative at 10M, and the theory predicts eventual failure for any finite fixed margin.
 
 ### Fixed Log Scaling
 
 The fixed-log run uses $\alpha=\log n$. The learned margin is _jmac Use fewer decimal places here and elsewhere. jmac_
-$\Delta\approx3.9361$, comfortably above the threshold $\Delta>1$. Therefore the
-theory predicts $p_t(n)\to1$, which is exactly what is observed. Target
-attention reaches 1.0000 at long lengths, the positive logit remains positive,
-and positive accuracy remains 1.0000 through length 10M.
+$\Delta\approx3.94$, comfortably above the threshold $\Delta>1$. Therefore the theory predicts $p_t(n)\to1$, which is exactly what is observed. Target attention reaches 1.000 at long lengths, the positive logit remains positive, and positive accuracy remains 1 through length 10M.
 
 ### Learned Log Scaling
 
-The learned-log runs show that finite evaluation success is not the same as
-asymptotic success. The 50-epoch run has $c\Delta=0.4894$ and fails at 10M. The
-100-epoch run has $c\Delta=0.7623$. It succeeds at 10M, but since
-$c\Delta<1$, the theory predicts eventual failure at sufficiently larger
-lengths. The 200-epoch run reaches $c\Delta=1.1218>1$, entering the asymptotic
-success regime predicted by the simplified model.
+The learned-log runs show that finite evaluation success is not the same as asymptotic success. The 50-epoch run has $c\Delta=0.49$ and fails at 10M. The 100-epoch run has $c\Delta=0.76$. It succeeds at 10M, but since $c\Delta<1$, the theory predicts eventual failure at sufficiently larger lengths. The 200-epoch run reaches $c\Delta=1.12>1$, entering the asymptotic success regime predicted by the simplified model.
 
-This is one of the main lessons of the experiment. A finite benchmark can be
-too short to distinguish a strong finite-length solution from an infinite-length
-solution. The better diagnostic in this reduced setting is the effective
-exponent $c\Delta$.
+This is one of the main lessons of the experiment. A finite benchmark can be too short to distinguish a strong finite-length solution from an infinite-length solution. The better diagnostic in this reduced setting is the effective exponent $c\Delta$.
 
 ## Mechanism: What The Model Learns
 
-The reduced model also allows a direct weight-level explanation of where
-$\Delta$ comes from. Since the final input token is the non-target token $u$, the
-final query is $q_u$. Let $k_t$ be the target key and $k_u$ be the non-target
-key. Then
+The reduced model also allows a direct weight-level explanation of where $\Delta$ comes from. Since the last input token is the non-target token $u$, the final query is $q_u$. Let $k_t$ be the target key and $k_u$ be the non-target key. Then
 
 ```math
 a
@@ -408,93 +394,56 @@ For the `learned_log_e200` checkpoint, the learned vectors are approximately
 ```math
 q_u=
 \begin{bmatrix}
-2.1707\\
-1.8260
+2.171\\
+1.826
 \end{bmatrix},
 \qquad
 k_t=
 \begin{bmatrix}
-1.5457\\
-1.4076
+1.546\\
+1.408
 \end{bmatrix},
 \qquad
 k_u=
 \begin{bmatrix}
--1.5580\\
--1.3366
+-1.558\\
+-1.337
 \end{bmatrix}.
 ```
 
 This gives
 
 ```math
-a\approx4.1900,
+a\approx4.190,
 \qquad
-b\approx-4.1171,
+b\approx-4.117,
 \qquad
-\Delta\approx8.3072.
+\Delta\approx8.307.
 ```
 
-Geometrically, $q_u$ points in a direction that separates the target key from
-the non-target key. The target key has a positive projection along the final
-query direction, while the non-target key has a negative projection. Equivalently,
-$q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the
-score pattern $a>b$ required by the two-score theory.
+Geometrically, $q_u$ points in a direction that separates the target key from the non-target key. The target key has a positive projection along the final query direction, while the non-target key has a negative projection. Equivalently, $q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the score pattern $a>b$ required by the two-score theory.
 
-This mechanism explains how the model creates a target advantage, but it also
-shows why a target advantage is not by itself enough. Under constant scaling,
-even a large fixed $\Delta$ is eventually overwhelmed by the growing number of
-non-target positions. Learned-log attention has an additional degree of freedom:
-it can increase the coefficient $c$ so that the effective margin grows like
-$c\Delta\log n$. In the successful learned-log run, optimization makes the
-product $c\Delta$ cross the threshold.
+This mechanism explains how the model creates a target advantage, but it also shows why a target advantage is not by itself enough. Under constant scaling, even a large fixed $\Delta$ is eventually overwhelmed by the growing number of non-target positions. Learned-log attention has an additional degree of freedom: it can increase the coefficient $c$ so that the effective margin grows like $c\Delta\log n$. In the successful learned-log run, optimization makes the product $c\Delta$ cross the threshold.
 
 ## Discussion
 
-The main contribution of this report is a controlled verification of the
-simplified length-aware attention theory in a trainable reduced model. The
-closed-form target attention equation is not merely a post-hoc curve fit. The
-trained model satisfies the two-score assumption directly, so the theory applies
-to the learned weights.
+The main contribution of this report is a controlled analysis of length-aware
+attention scaling in a trainable reduced model. The two-token,
+position-independent construction makes the two-score form expected by design;
+it is not itself a learned discovery. This simplification lets us apply the
+closed-form target-attention equation directly and isolate the effect of the
+score multiplier from other transformer components.
 
-The result also clarifies the difference between finite and asymptotic
-generalization. In constant mode, longer training increases the raw margin and
-pushes the failure length farther away, but it never changes the limit behavior.
-In learned-log mode, a run can pass length 10M while still having $c\Delta<1$.
-This makes $c\Delta$ a more informative diagnostic than accuracy at a single
-large evaluation length.
+The result also clarifies the difference between finite and asymptotic generalization. In constant mode, longer training increases the raw margin and pushes the failure length farther away, but it never changes the limit behavior. In learned-log mode, a run can pass length 10M while still having $c\Delta<1$. This makes $c\Delta$ a more informative diagnostic than accuracy at a single large evaluation length.
 
-The reduced model is intentionally limited. It uses fixed one-hot values, no
-positional encodings, one final query, and a simple binary classifier. These
-restrictions make the mechanism easy to analyze, but they also mean that the
-conclusion should not be transferred directly to full transformers. A full
-transformer may have non-identical non-target scores, learned value vectors,
-multiple heads, residual streams, feed-forward layers, layer normalization, and
-pooling effects. Those components can break the exact two-score structure that
-makes the present analysis clean.
-
-The value of the reduced model is therefore diagnostic. It separates two
-questions that are entangled in a full transformer. First, can the architecture
-create a target-vs-non-target margin? Second, does the length-scaling mechanism
-make that margin grow fast enough to beat the softmax denominator? In this
-controlled binary setting, the answer to both questions can be measured
-directly.
+The reduced model is intentionally limited. It uses fixed semantic value vectors, no positional encodings, one final query, and a simple binary classifier. These restrictions make the mechanism easy to analyze, but they also mean that the conclusion should not be transferred directly to full transformers. A full transformer may have non-identical non-target scores, learned value vectors, multiple heads, residual streams, feed-forward layers, layer normalization, and pooling effects. Those components can break the exact two-score structure that makes the present analysis clean. The value of the reduced model is therefore diagnostic. It separates two questions that are entangled in a full transformer. First, can the architecture create a target-vs-non-target margin? Second, does the length-scaling mechanism
+make that margin grow fast enough to beat the softmax denominator? In this controlled binary setting, the answer to both questions can be measured directly.
 
 ## Conclusion
 
-This report studied length generalization in a reduced binary attention
-classifier. The trained model learns the two-score structure assumed by the
-simplified theory, making the closed-form target attention expression an
-accurate description of the learned model.
+This report studied length generalization in a reduced binary attention classifier. Its two-token, position-independent construction yields the two-score structure assumed by the simplified theory, making the closed-form target-attention expression an accurate description of the model.
 
-The experiments support three conclusions. Constant attention scaling learns
-finite-length robustness but fails asymptotically. Fixed log-length scaling
-succeeds when the target-vs-non-target margin satisfies $\Delta>1$. Learned-log
-scaling succeeds asymptotically only when optimization pushes $c\Delta>1$.
-Therefore, in this reduced setting, the central condition for length
-generalization is not merely fitting the training length or passing a finite
-long-length benchmark. The effective target margin must grow faster than the
-logarithm of the number of competing non-target keys.
+The experiments support three conclusions. Constant attention scaling learns finite-length robustness but fails asymptotically. Fixed log-length scaling succeeds when the target-vs-non-target margin satisfies $\Delta>1$. Learned-log scaling succeeds asymptotically only when optimization pushes $c\Delta>1$. Therefore, in this reduced setting, the central condition for length generalization is not merely fitting the training length or passing a finite long-length benchmark. The effective target margin must grow faster than the logarithm of the number of competing non-target keys.
 
 ## Appendix A: Additional Material To Add Later
 
