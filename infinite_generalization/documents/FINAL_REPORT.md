@@ -35,6 +35,11 @@ _jmac Please add a related work section. This can be based on a single piece of 
 
 ## Background: Simplified Binary Attention
 
+This section derives, from the model definition, the score structure and
+closed-form target-attention mass previewed in the Introduction, and then uses
+that closed form to characterize when the classifier generalizes to unbounded
+length.
+
 The task uses a two-token vocabulary:
 
 - $t$: target token
@@ -42,11 +47,12 @@ The task uses a two-token vocabulary:
 
 A positive length-$n$ sequence, with $n\geq2$, contains one target token and
 $n-1$ non-target tokens. The token in the last position is always the
-non-target token $u$, so positive and negative examples use the same readout
-query. The model has no positional encoding, so permuting the tokens among the
-first $n-1$ positions does not change its output. We place the target in the
-first position only to make the notation easier to read; any position other
-than the last is equivalent.
+non-target token $u$, and the readout query is formed from this last-position
+token, so positive and negative examples share the same query. The model has
+no positional encoding, so permuting the tokens among the first $n-1$ positions
+does not change its output. We place the target in the first position only to
+make the notation easier to read; any position other than the last is
+equivalent.
 
 ```text
 t, u, u, ..., u
@@ -62,10 +68,7 @@ At a high level, the query at the last position scores every token in the
 sequence, softmax converts those scores into attention weights, and the
 weighted sum of the token values is passed to a binary classifier.
 
-The model begins with fixed one-hot representations for $t$ and $u$. Learned
-query and key projections produce the attention scores. In the value pathway,
-the same one-hot representations are used directly, with no learned value
-projection:
+The model begins with fixed one-hot embeddings for $t$ and $u$:
 
 ```math
 t \mapsto [1,0],
@@ -73,21 +76,24 @@ t \mapsto [1,0],
 u \mapsto [0,1].
 ```
 
-This fixed value pathway makes the output directly record how much total
-attention is assigned to each token type. For a sequence represented by the
-one-hot matrix $X$, the learned projections produce $Q=XW_Q$ and $K=XW_K$.
-Conventional self-attention forms the full $n\times n$ score matrix
-$QK^\top/\sqrt d$. This reduced classifier uses only the query at the last
-position and therefore needs only its scores against the $n$ keys:
+A length-$n$ sequence is thus represented by a one-hot matrix
+$X\in\mathbb{R}^{n\times2}$ with one token embedding per row. The learned query
+and key projections are $Q=XW_Q$ and $K=XW_K$ with
+$W_Q,W_K\in\mathbb{R}^{2\times d}$, so $Q,K\in\mathbb{R}^{n\times d}$ and
+$q_{\mathrm{last}}$ is the last row of $Q$. Here $d$ is the query and key
+dimension, distinct from the embedding dimension 2. Conventional self-attention
+forms the full $n\times n$ score matrix $QK^\top/\sqrt d$. This reduced
+classifier uses only the query at the last position and therefore needs only
+its scores against the $n$ keys:
 
 ```math
 s_j=\frac{q_{\mathrm{last}}^\top k_j}{\sqrt d},
 \qquad j=1,\ldots,n.
 ```
 
-Here $d$ is the query and key dimension. Since the token in the last position
-is $u$, $q_{\mathrm{last}}=q_u$ for every example. The target and non-target
-scores are therefore
+Since the token in the last position is $u$, $q_{\mathrm{last}}=q_u$ for every
+example. Writing $k_t$ and $k_u$ for the target and non-target keys, which are
+position-independent, the target and non-target scores are
 
 ```math
 a=\frac{q_u^\top k_t}{\sqrt d},
@@ -115,14 +121,13 @@ $\alpha(n)$ applied before softmax. The attention weight on position $j$ is
 A_j
 =
 \frac{e^{\alpha(n)s_j}}
-{\sum_{k=1}^{n}e^{\alpha(n)s_k}}.
+{\sum_{i=1}^{n}e^{\alpha(n)s_i}}.
 ```
 
-Standard scaled dot-product attention corresponds to $\alpha(n)=1$ here,
-because the usual $1/\sqrt d$ factor is already included in $s_j$. The
-length-aware variants instead make $\alpha(n)$ a fixed or learned function of
-the sequence length. This additional multiplier is the main departure from the
-usual attention computation.
+Standard attention corresponds to $\alpha(n)=1$. The
+length-aware variants instead make $\alpha(n)$ grow with the sequence length. We
+consider three choices of $\alpha(n)$ — constant, logarithmic, and learned
+logarithmic — and analyze each in turn below.
 
 For the positive score vector $S_n=(a,b,\ldots,b)$, the attention mass on the
 single target key is
@@ -144,14 +149,19 @@ p_t(n)
 {e^{\alpha(n)\Delta}+(n-1)}.
 ```
 
-The classifier reads the weighted sum of the fixed value vectors:
+The value pathway reuses these one-hot embeddings directly as value vectors,
+with no learned value projection, so the value vector $v_j$ at position $j$ is
+$[1,0]$ when its token is the target and $[0,1]$ otherwise. This makes the
+output directly record how much total attention is assigned to each token type.
+The classifier reads the weighted sum of these value vectors:
 
 ```math
 o(n)=\sum_{j=1}^{n} A_j v_j.
 ```
 
-On a positive example, the target carries weight $p_t(n)$ and all non-targets
-together carry the complementary weight $1-p_t(n)$. Its output is therefore
+On a positive example, the target carries weight $p_t(n)$ and the non-targets
+together carry the remaining $1-p_t(n)$, so the output is a convex combination
+of the two value vectors:
 
 ```math
 o_{\text{pos}}(n)
@@ -167,10 +177,12 @@ A negative example contains only $u$, so its output is always
 o_{\text{neg}}(n)=[0,1].
 ```
 
-The positive output is thus governed by the single scalar $p_t(n)$. If
-$p_t(n)\to0$, the positive representation converges to the negative
-representation, and the representation margin between the two classes
-vanishes. If $p_t(n)$ converges to a constant strictly between 0 and 1,
+The negative output is this same combination with target mass $0$, so both
+outputs are fixed by the single scalar $p_t(n)$. Classification therefore
+reduces to a threshold on $p_t(n)$, and the classifier's logit increases with
+$p_t(n)$. If $p_t(n)\to0$, the positive representation converges to
+the negative representation, and the representation margin between the two
+classes vanishes. If $p_t(n)$ converges to a constant strictly between 0 and 1,
 classification depends on the learned classifier's decision boundary. The
 stronger, target-dominant outcome is $p_t(n)\to1$. The conditions below
 distinguish these three cases.
@@ -178,9 +190,13 @@ distinguish these three cases.
 ### Length-Scaling Regimes
 
 Assume that $\Delta>0$, so the target has a score advantage over each
-non-target. If $\Delta\leq0$, none of the positive multipliers considered below
-can create such an advantage. The competing term $(n-1)$ is the source of
-length dependence.
+non-target. If $\Delta\leq0$, none of the multipliers considered below can create such an
+advantage, since each $\alpha(n)$ is positive and scales $\Delta$ without
+changing its sign. The competing term $(n-1)$ is the source of
+length dependence: it grows like $n$, so the target term $e^{\alpha(n)\Delta}$
+must grow at least as fast for target attention to survive. A logarithmic
+$\alpha(n)$ is the natural way to achieve this, since it turns
+$e^{\alpha(n)\Delta}$ into a power of $n$.
 
 For the constant baseline $\alpha(n)=1$,
 
@@ -198,7 +214,8 @@ an unbounded number of non-target competitors. Consequently,
 $o_{\text{pos}}(n)\to[0,1]$, the same representation as
 $o_{\text{neg}}(n)$.
 
-For the fixed-log multiplier $\alpha(n)=\log n$,
+For the log multiplier $\alpha(n)=\log n$, we have
+$e^{\alpha(n)\Delta}=e^{\Delta\log n}=n^\Delta$, so
 
 ```math
 p_t(n)
@@ -218,10 +235,10 @@ The limit depends on the learned margin:
 \end{cases}
 ```
 
-Thus, $\Delta>1$ is the exact condition for target attention to converge to 1,
-while $0<\Delta<1$ causes the positive representation to collapse onto the
-negative representation. At the boundary $\Delta=1$, the two representations
-remain distinct, and classification depends on the learned decision boundary.
+Thus $\Delta>1$ makes target attention converge to 1, while $0<\Delta<1$ causes
+the positive representation to collapse onto the negative representation. At the
+boundary $\Delta=1$, the two representations remain distinct, and classification
+depends on the learned decision boundary.
 
 For the learned-log multiplier used in the experiments,
 
@@ -229,7 +246,11 @@ For the learned-log multiplier used in the experiments,
 \alpha(n)=1+c\log(1+n),
 ```
 
-the target attention mass is
+where $c$ is a learned, strictly positive coefficient. The additive $1$ makes
+$\alpha=1$ at $c=0$, recovering the constant baseline, and using $\log(1+n)$
+keeps the multiplier well-defined at small $n$; neither term changes the
+asymptotic exponent, which is governed by $c\Delta$. Since
+$e^{\alpha(n)\Delta}=e^\Delta(1+n)^{c\Delta}$, the target attention mass is
 
 ```math
 p_t(n)
@@ -250,33 +271,34 @@ Its limit is
 \end{cases}
 ```
 
-Therefore, $c\Delta>1$ is the exact condition for target attention to
-converge to 1. The equality case again has a nonzero limiting target mass and
-depends on the classifier's decision boundary, whereas $c\Delta<1$ produces
-asymptotic collapse.
+Thus $c\Delta>1$ makes target attention converge to 1. The equality case again
+has a nonzero limiting target mass and depends on the classifier's decision
+boundary, whereas $c\Delta<1$ produces asymptotic collapse.
 
-A single general condition summarizes all three regimes. Rewriting the target
-attention mass as
+A single condition unifies all three regimes. Writing the target attention mass
+as
 
 ```math
 p_t(n)
 =
 \frac{1}
-{1+\exp\!\left(\log(n-1)-\alpha(n)\Delta\right)},
-```
-
-and defining
-
-```math
+{1+\exp\!\left(\log(n-1)-\alpha(n)\Delta\right)}
+=
+\sigma\big(g(n)\big),
+\qquad
 g(n)=\alpha(n)\Delta-\log(n-1),
 ```
 
-shows that $g(n)$ fully determines the asymptotic target mass: $p_t(n)\to1$
-when $g(n)\to+\infty$, $p_t(n)\to0$ when $g(n)\to-\infty$, and
-$p_t(n)\to1/(1+e^{-L})$ when $g(n)\to L$ for some finite $L$. Target-dominant
-attention therefore requires
-the scaled target margin to exceed the logarithm of the number of competing
-non-target keys by an amount that grows without bound.
+with $\sigma$ the logistic function, target attention converges to 1 exactly
+when $g(n)\to+\infty$, that is, when the scaled margin $\alpha(n)\Delta$ outgrows
+$\log(n-1)$ without bound. Since $\log(n-1)$ grows like $\log n$ with
+coefficient 1, the outcome is decided by how fast $\alpha(n)\Delta$ grows: it
+stays bounded for the constant baseline, so target attention always collapses,
+and grows like $\Delta\log n$ for the log multiplier and $c\Delta\log n$ for the
+learned-log multiplier. Target dominance therefore needs the coefficient of
+$\log n$ to exceed 1, giving the thresholds $\Delta>1$ and $c\Delta>1$. This is
+the precise sense in which length generalization requires the effective margin
+to grow faster than the softmax denominator.
 
 ## Experimental Design
 
@@ -329,7 +351,7 @@ _jmac Don't include the directory names here. Explain the labels you will be usi
 Run labels combine the multiplier mode with the training budget. For example,
 `constant_e50` denotes constant scaling trained for 50 epochs, while
 `learned_log_e200` denotes learned-log scaling trained for 200 epochs. We
-analyze constant runs at 50, 100, and 1000 epochs; one fixed-log run at 50
+analyze constant runs at 50, 100, and 1000 epochs; one log run at 50
 epochs; and learned-log runs at 50, 100, and 200 epochs. These compact labels
 are used in Table 1 and both figures below.
 
@@ -385,7 +407,7 @@ _jmac Explain what the updates column means. Use fewer decimal places for most o
 ![Target attention by length](./figures/final_report_target_attention_by_length.png)
 _jmac fixed path jmac_
 
-**Figure 1:** Target attention as a function of evaluation length. Constant scaling eventually dilutes target mass. Fixed log scaling succeeds because the
+**Figure 1:** Target attention as a function of evaluation length. Constant scaling eventually dilutes target mass. Log scaling succeeds because the
 learned margin is above 1. Learned-log behavior depends on whether optimization pushes $c\Delta$ above 1.
 
 _jmac In the figures, fix the graph titles so that they do not refer to stage 3, jmac_
@@ -408,9 +430,9 @@ For any fixed $\Delta$, $p_t(n)\to0$ as $n\to\infty$. Thus constant scaling can 
 
 This distinction is visible in the e1000 run. It learns a much larger margin than e50 or e100, and therefore keeps more target attention at length 10M. But the positive logit is still negative at 10M, and the theory predicts eventual failure for any finite fixed margin.
 
-### Fixed Log Scaling
+### Log Scaling
 
-The fixed-log run uses $\alpha=\log n$. The learned margin is _jmac Use fewer decimal places here and elsewhere. jmac_
+The log run uses $\alpha=\log n$. The learned margin is _jmac Use fewer decimal places here and elsewhere. jmac_
 $\Delta\approx3.94$, comfortably above the threshold $\Delta>1$. Therefore the theory predicts $p_t(n)\to1$, which is exactly what is observed. Target attention reaches 1.000 at long lengths, the positive logit remains positive, and positive accuracy remains 1 through length 10M.
 
 ### Learned Log Scaling
@@ -497,7 +519,7 @@ make that margin grow fast enough to beat the softmax denominator? In this contr
 
 This report studied length generalization in a reduced binary attention classifier. Its two-token, position-independent construction yields the two-score structure assumed by the simplified theory, making the closed-form target-attention expression an accurate description of the model.
 
-The experiments support three conclusions. Constant attention scaling learns finite-length robustness but fails asymptotically. Fixed log-length scaling succeeds when the target-vs-non-target margin satisfies $\Delta>1$. Learned-log scaling succeeds asymptotically only when optimization pushes $c\Delta>1$. Therefore, in this reduced setting, the central condition for length generalization is not merely fitting the training length or passing a finite long-length benchmark. The effective target margin must grow faster than the logarithm of the number of competing non-target keys.
+The experiments support three conclusions. Constant attention scaling learns finite-length robustness but fails asymptotically. Log-length scaling succeeds when the target-vs-non-target margin satisfies $\Delta>1$. Learned-log scaling succeeds asymptotically only when optimization pushes $c\Delta>1$. Therefore, in this reduced setting, the central condition for length generalization is not merely fitting the training length or passing a finite long-length benchmark. The effective target margin must grow faster than the logarithm of the number of competing non-target keys.
 
 ## Appendix A: Additional Material To Add Later
 
