@@ -107,7 +107,9 @@ The architecture thus fixes the score vector of a positive example to the form
 S_n=(a,b,b,\ldots,b),
 ```
 
-while training determines the values of $a$ and $b$. Define the target score
+while training determines only the two values $a$ and $b$. Because there is a
+single non-target type, every non-target position holds the same token, hence
+the same key and the same score $b$ by construction. Define the target score 
 margin as
 
 ```math
@@ -302,121 +304,78 @@ to grow faster than the softmax denominator.
 
 ## Experimental Design
 
-The experiment implements the simplified model as a trainable reduced attention classifier. It uses:
+The experiments train the reduced model derived above — fixed one-hot
+embeddings reused as value vectors, learned query and key projections
+$W_Q,W_K\in\mathbb{R}^{2\times2}$, a last-token query, softmax attention, and a
+binary classifier on the two-dimensional attention output — and vary only the
+score multiplier $\alpha(n)$ across three modes:
 
-- one-hot token inputs
-- fixed semantic value vectors $t\mapsto[1,0]$ and $u\mapsto[0,1]$
-- learned query projection $W_Q$
-- learned key projection $W_K$
-- a last-token query only
-- softmax attention over all sequence positions
-- a binary classifier on the attention output
-
-For input matrix $X$, the model computes
-
-```math
-Q=XW_Q,
-\qquad
-K=XW_K.
-```
-
-The final-query score for position $j$ is
-
-```math
-s_j
-=
-\frac{q_{\mathrm{last}}^\top k_j}{\sqrt d}.
-```
-
-The multiplier $\alpha$ is then applied before softmax. The experiments compare three multiplier modes:
-
-| Mode | Multiplier |
+| Mode | $\alpha(n)$ |
 |---|---|
-| `constant` | $\alpha=1$ |
-| `log` | $\alpha=\log n$ |
-| `learned_log` | $\alpha=1+c\log(1+n)$ |
+| `constant` | $1$ |
+| `log` | $\log n$ |
+| `learned_log` | $1+c\log(1+n)$ |
 
-For `learned_log`, the coefficient is parameterized as
+For `learned_log`, the coefficient is $c=\mathrm{softplus}(k_\alpha)$, where
+$k_\alpha$ is an unconstrained learnable scalar, so $c$ stays positive during
+optimization.
 
-```math
-c=\mathrm{softplus}(k_\alpha),
-```
+The classifier is a learned linear layer $\mathbb{R}^2\to\mathbb{R}$ that maps
+the attention output $o(n)=(p_t(n),1-p_t(n))$ to a single logit. An example is
+classified target-present when this logit is at least 0 — equivalently, when its
+sigmoid probability is at least 0.5. Two quantities from this classifier appear
+in the results: the positive logit, the logit on a positive example, whose sign
+therefore decides whether that example is classified correctly; and the positive
+accuracy, the fraction of positive examples whose logit is at least 0.
 
-so it remains positive during optimization.
+Each run trains at length 10 on 2000 examples split evenly between positive and
+negative, minimizing binary cross-entropy on the logit with AdamW (learning rate
+$3\times10^{-3}$, no weight decay, batch size 64, query and key dimension
+$d=2$). One epoch is a single pass over the 2000 examples, or 32 optimizer
+steps, so the 50-, 100-, 200-, 400-, and 1000-epoch budgets below correspond
+to 1600, 3200, 6400, 12800, and 32000 steps. Each configuration is trained
+under five random seeds (0-4), and all reported numbers are the mean and
+standard deviation across these seeds.
 
-All analyzed runs train at length 10 and evaluate up to length 10,000,000. Long evaluation is chunked to avoid materializing the full evaluation tensor at once.
+Each trained model is evaluated at lengths $10$, $100$, $1000$, $10^4$, $10^5$,
+$10^6$, and $10^7$, on 50 balanced examples per length. Because a
+length-$10^7$ evaluation cannot be held in memory at once, examples are
+generated and scored in small chunks, so the full evaluation tensor is never
+materialized.
 
-_jmac Don't include the directory names here. Explain the labels you will be using on later figures. jmac_
-
-Run labels combine the multiplier mode with the training budget. For example,
-`constant_e50` denotes constant scaling trained for 50 epochs, while
-`learned_log_e200` denotes learned-log scaling trained for 200 epochs. We
-analyze constant runs at 50, 100, and 1000 epochs; one log run at 50
-epochs; and learned-log runs at 50, 100, and 200 epochs. These compact labels
-are used in Table 1 and both figures below.
-
-## Closed-Form Consistency Check
-
-The closed-form expression for $p_t(n)$ is exact only if the two-score assumption holds. Therefore, the first empirical question is not whether the formula can be algebraically derived. The first empirical question is whether the trained model actually produces one target score and one shared non-target score.
-
-As expected from the two-token construction, the non-target score standard
-deviation is 0.0 at every evaluated length. The reconstructed closed-form
-attention mass also matches the empirical attention mass up to small numerical
-error.
-
-| Run | Non-target score std | Max observed attention error | Two-score assumption |
-|---|---:|---:|---|
-| `constant_e50` | 0.0 | about $2.5\times10^{-8}$ | holds |
-| `constant_e100` | 0.0 | about $2.9\times10^{-8}$ | holds |
-| `constant_e1000` | 0.0 | about $9.0\times10^{-7}$ | holds |
-| `log_e50` | 0.0 | about $1.2\times10^{-7}$ | holds |
-| `learned_log_e50` | 0.0 | about $1.4\times10^{-3}$ | holds |
-| `learned_log_e100` | 0.0 | about $1.5\times10^{-5}$ | holds |
-| `learned_log_e200` | 0.0 | about $1.2\times10^{-7}$ | holds |
-
-Because the vocabulary has only two token identities and no positional
-encoding, this agreement is expected rather than a separate empirical finding.
-The check primarily verifies that the implementation, metric extraction, and
-closed-form calculation are consistent before the formula is used to interpret
-the longer-length results.
-_jmac I think this is overstated. This is really just a debugging step. After all, we have only two tokens, so only two scores can be learned. It is not at all surprising that the error is zero except for tiny numerical deviations. jmac_
+Each run is labeled by its multiplier mode and epoch budget: for example,
+`constant_e50` is constant scaling trained for 50 epochs and `learned_log_e200`
+is learned-log scaling trained for 200 epochs. We analyze constant runs at 50,
+100, and 1000 epochs; one log run at 50 epochs; and learned-log runs at 50, 100, 200,
+and 400 epochs. These labels index the rows of Table 1 and the curves in both
+figures below.
 
 ## Results
 
 Negative examples are classified correctly in every analyzed run and length. This is expected: a negative sequence contains only non-target values, so the attention output remains in the non-target direction regardless of how attention is distributed over positions. The length-generalization failure is therefore a positive-example failure: the target mass in positive examples can dilute until the classifier no longer detects the target.
 
-Table 1 summarizes the main results at evaluation length 10,000,000. The
-`Updates` column is the total number of optimizer steps, not the number of
-training examples. With 2000 examples and batch size 64, each epoch contains 32
-updates; therefore 50, 100, 200, and 1000 epochs correspond to 1600, 3200,
-6400, and 32000 updates, respectively.
+Table 1 summarizes the main results at evaluation length $10^7$, reported as
+mean and standard deviation over the five seeds.
 
-| Run | Updates | $\Delta$ | Learned $c$ | $c\Delta$ | $p_t(10M)$ | Positive logit at 10M | Positive accuracy at 10M |
+| Run | Steps | $\Delta$ | $c$ | $c\Delta$ | $p_t(10^7)$ | Positive logit | Positive accuracy |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `constant_e50` | 1600 | 8.10 | n/a | n/a | 0.0003 | -3.66 | 0 |
-| `constant_e100` | 3200 | 8.99 | n/a | n/a | 0.0008 | -4.93 | 0 |
-| `constant_e1000` | 32000 | 12.27 | n/a | n/a | 0.021 | -18.66 | 0 |
-| `log_e50` | 1600 | 3.94 | n/a | n/a | 1.000 | 3.72 | 1 |
-| `learned_log_e50` | 1600 | 7.41 | 0.066 | 0.49 | 0.304 | -1.38 | 0 |
-| `learned_log_e100` | 3200 | 7.93 | 0.096 | 0.76 | 0.984 | 4.86 | 1 |
-| `learned_log_e200` | 6400 | 8.30 | 0.135 | 1.12 | 1.000 | 6.82 | 1 |
+| `constant_e50` | 1600 | 9.0 ± 0.2 | n/a | n/a | 0.001 | -3.3 ± 0.1 | 0% |
+| `constant_e100` | 3200 | 9.9 ± 0.2 | n/a | n/a | 0.002 | -4.5 ± 0.1 | 0% |
+| `constant_e1000` | 32000 | 13.2 ± 0.2 | n/a | n/a | 0.050 | -17.3 ± 0.4 | 0% |
+| `log_e50` | 1600 | 4.4 ± 0.1 | n/a | n/a | 1.000 | 3.2 ± 0.1 | 100% |
+| `learned_log_e50` | 1600 | 8.1 ± 0.2 | 0.072 ± 0.006 | 0.58 ± 0.03 | 0.79 | 1.9 ± 0.5 | 100% |
+| `learned_log_e100` | 3200 | 8.6 ± 0.3 | 0.096 ± 0.008 | 0.83 ± 0.05 | 0.997 | 4.6 ± 0.1 | 100% |
+| `learned_log_e200` | 6400 | 9.0 ± 0.3 | 0.126 ± 0.010 | 1.14 ± 0.06 | 1.000 | 6.4 ± 0.1 | 100% |
+| `learned_log_e400` | 12800 | 9.4 ± 0.3 | 0.166 ± 0.013 | 1.55 ± 0.08 | 1.000 | 9.6 ± 0.1 | 100% |
 
-_jmac Explain what the updates column means. Use fewer decimal places for most of this. jmac_
 
 
 ![Target attention by length](./figures/final_report_target_attention_by_length.png)
-_jmac fixed path jmac_
-
-**Figure 1:** Target attention as a function of evaluation length. Constant scaling eventually dilutes target mass. Log scaling succeeds because the
-learned margin is above 1. Learned-log behavior depends on whether optimization pushes $c\Delta$ above 1.
-
-_jmac In the figures, fix the graph titles so that they do not refer to stage 3, jmac_
+**Figure 1:** Target attention as a function of evaluation length, averaged over five seeds (shaded bands show ±1 standard deviation). Constant scaling eventually dilutes target mass. Log scaling succeeds because the learned margin is above 1. Learned-log behavior depends on whether optimization pushes $c\Delta$ above 1.
 
 
 ![Positive logit by length](./figures/final_report_positive_logit_by_length.png)
-_jmac fixed path jmac_
-
-**Figure 2:** Positive logit as a function of evaluation length. Positive accuracy fails when the target attention mass moves past the classifier's decision boundary.
+**Figure 2:** Positive logit as a function of evaluation length, averaged over five seeds (shaded bands show ±1 standard deviation; the dashed line marks the logit-0 decision boundary). Positive accuracy fails when the target attention mass moves past the classifier's decision boundary.
 
 ### Constant Scaling
 
@@ -426,20 +385,19 @@ Constant scaling uses $\alpha=1$. The observed pattern is that more training inc
 p_t(n)=\frac{e^\Delta}{e^\Delta+(n-1)}.
 ```
 
-For any fixed $\Delta$, $p_t(n)\to0$ as $n\to\infty$. Thus constant scaling can learn a stronger finite-length solution but not an infinite-length solution.
+For any fixed $\Delta$, $p_t(n)\to0$ as $n\to\infty$. Thus constant scaling can learn a stronger finite-length solution but not an unbounded-length one; positive accuracy at $10^7$ is 0 for all three budgets in every seed.
 
-This distinction is visible in the e1000 run. It learns a much larger margin than e50 or e100, and therefore keeps more target attention at length 10M. But the positive logit is still negative at 10M, and the theory predicts eventual failure for any finite fixed margin.
+This distinction is visible in the e1000 run. It learns a much larger margin than e50 or e100, and therefore keeps more target attention at length $10^7$. But the positive logit is still negative at $10^7$, and the theory predicts eventual failure for any finite fixed margin.
 
 ### Log Scaling
 
-The log run uses $\alpha=\log n$. The learned margin is _jmac Use fewer decimal places here and elsewhere. jmac_
-$\Delta\approx3.94$, comfortably above the threshold $\Delta>1$. Therefore the theory predicts $p_t(n)\to1$, which is exactly what is observed. Target attention reaches 1.000 at long lengths, the positive logit remains positive, and positive accuracy remains 1 through length 10M.
+The log run uses $\alpha=\log n$. The learned margin is $\Delta=4.4\pm0.1$, comfortably above the threshold $\Delta>1$ in every seed, so the theory predicts $p_t(n)\to1$ — which is what is observed: target attention reaches 1.000 at long lengths, the positive logit stays positive, and positive accuracy is 1 at $10^7$ in all five seeds.
 
 ### Learned Log Scaling
 
-The learned-log runs show that finite evaluation success is not the same as asymptotic success. The 50-epoch run has $c\Delta=0.49$ and fails at 10M. The 100-epoch run has $c\Delta=0.76$. It succeeds at 10M, but since $c\Delta<1$, the theory predicts eventual failure at sufficiently larger lengths. The 200-epoch run reaches $c\Delta=1.12>1$, entering the asymptotic success regime predicted by the simplified model.
+The learned-log runs separate finite-length success from asymptotic success. At 50 and 100 epochs the model already passes the $10^7$ benchmark — positive accuracy is 1 in all five seeds — yet its exponent stays below the threshold, $c\Delta=0.58\pm0.03$ and $0.83\pm0.05$ respectively, so the theory predicts eventual failure at larger lengths. Only at 200 epochs does $c\Delta$ cross 1 ($1.14\pm0.06$, above 1 in all five seeds), entering the asymptotic-success regime; by 400 epochs it is well clear ($1.55\pm0.08$). The crossing is driven by the coefficient $c$, which grows monotonically with the training budget ($0.072\to0.096\to0.126\to0.166$) while the raw margin $\Delta$ changes little.
 
-This is one of the main lessons of the experiment. A finite benchmark can be too short to distinguish a strong finite-length solution from an infinite-length solution. The better diagnostic in this reduced setting is the effective exponent $c\Delta$.
+This is one of the main lessons of the experiment. Passing a finite benchmark such as $10^7$ does not certify unbounded-length generalization: two of our budgets clear $10^7$ with $c\Delta<1$. The $10^7$ outcome for a $c\Delta<1$ run is itself fragile — a lower-margin draw ($c\Delta\approx0.5$) already fails at $10^7$ — whereas the $c\Delta>1$ verdict is reached in every seed by 200 epochs. The reliable diagnostic is therefore whether $c\Delta$ exceeds 1, not accuracy at any single large length.
 
 ## Mechanism: What The Model Learns
 
@@ -465,39 +423,39 @@ a-b
 \frac{q_u^\top(k_t-k_u)}{\sqrt d}.
 ```
 
-For the `learned_log_e200` checkpoint, the learned vectors are approximately
+For one `learned_log_e200` checkpoint (seed 1), the learned vectors are approximately
 
 ```math
 q_u=
 \begin{bmatrix}
-2.171\\
-1.826
+-1.830\\
+1.646
 \end{bmatrix},
 \qquad
 k_t=
 \begin{bmatrix}
-1.546\\
-1.408
+-2.232\\
+1.642
 \end{bmatrix},
 \qquad
 k_u=
 \begin{bmatrix}
--1.558\\
--1.337
+1.990\\
+-1.428
 \end{bmatrix}.
 ```
 
 This gives
 
 ```math
-a\approx4.190,
+a\approx4.799,
 \qquad
-b\approx-4.117,
+b\approx-4.237,
 \qquad
-\Delta\approx8.307.
+\Delta\approx9.036.
 ```
 
-Geometrically, $q_u$ points in a direction that separates the target key from the non-target key. The target key has a positive projection along the final query direction, while the non-target key has a negative projection. Equivalently, $q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the score pattern $a>b$ required by the two-score theory.
+Geometrically, $q_u$ points in a direction that separates the target key from the non-target key. The target key has a positive projection along the final query direction, while the non-target key has a negative projection. Equivalently, $q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the score pattern $a>b$ required by the two-score theory. The geometry is the same in every seed: across seeds 0-4 the target score $a$ is positive and the non-target score $b$ negative, $q_u$ is nearly collinear with $k_t-k_u$ (cosine $\geq0.99$), and $\Delta=9.03\pm0.28$.
 
 This mechanism explains how the model creates a target advantage, but it also shows why a target advantage is not by itself enough. Under constant scaling, even a large fixed $\Delta$ is eventually overwhelmed by the growing number of non-target positions. Learned-log attention has an additional degree of freedom: it can increase the coefficient $c$ so that the effective margin grows like $c\Delta\log n$. In the successful learned-log run, optimization makes the product $c\Delta$ cross the threshold.
 
@@ -510,7 +468,7 @@ it is not itself a learned discovery. This simplification lets us apply the
 closed-form target-attention equation directly and isolate the effect of the
 score multiplier from other transformer components.
 
-The result also clarifies the difference between finite and asymptotic generalization. In constant mode, longer training increases the raw margin and pushes the failure length farther away, but it never changes the limit behavior. In learned-log mode, a run can pass length 10M while still having $c\Delta<1$. This makes $c\Delta$ a more informative diagnostic than accuracy at a single large evaluation length.
+The result also clarifies the difference between finite and asymptotic generalization. In constant mode, longer training increases the raw margin and pushes the failure length farther away, but it never changes the limit behavior. In learned-log mode, a run can pass length $10^7$ while still having $c\Delta<1$. This makes $c\Delta$ a more informative diagnostic than accuracy at a single large evaluation length.
 
 The reduced model is intentionally limited. It uses fixed semantic value vectors, no positional encodings, one final query, and a simple binary classifier. These restrictions make the mechanism easy to analyze, but they also mean that the conclusion should not be transferred directly to full transformers. A full transformer may have non-identical non-target scores, learned value vectors, multiple heads, residual streams, feed-forward layers, layer normalization, and pooling effects. Those components can break the exact two-score structure that makes the present analysis clean. The value of the reduced model is therefore diagnostic. It separates two questions that are entangled in a full transformer. First, can the architecture create a target-vs-non-target margin? Second, does the length-scaling mechanism
 make that margin grow fast enough to beat the softmax denominator? In this controlled binary setting, the answer to both questions can be measured directly.
