@@ -351,12 +351,12 @@ figures below.
 
 ## Results
 
-Negative examples are classified correctly in every analyzed run and length. This is expected: a negative sequence contains only non-target values, so the attention output remains in the non-target direction regardless of how attention is distributed over positions. The length-generalization failure is therefore a positive-example failure: the target mass in positive examples can dilute until the classifier no longer detects the target.
+In this task, length generalization is decided entirely by the positive examples. A negative sequence contains only non-target values, so the attention output stays in the non-target direction however attention is spread across positions, and negatives are classified correctly in every analyzed run at every length. The difficulty lives in the positive examples: the target mass $p_t$ can dilute with length until the classifier no longer detects the target. Table 1 reports each run at $10^7$, and Figures 1 and 2 trace both quantities across length.
 
 **Table 1:** Main results at evaluation length $10^7$, as means over five seeds
-(± one standard deviation). The Target attention column is the target mass $p_t$.
+(± one standard deviation). Negative accuracy is 100% in every run.
 
-| Run | Steps | $\Delta$ | $c$ | $c\Delta$ | Target attention | Positive logit | Positive accuracy |
+| Run | Steps | $\Delta$ | $c$ | $c\Delta$ | $p_t$ | Positive logit | Positive accuracy |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `constant_e50` | 1600 | 9.0 ± 0.2 | n/a | n/a | 0.001 | -3.3 ± 0.1 | 0% |
 | `constant_e100` | 3200 | 9.9 ± 0.2 | n/a | n/a | 0.002 | -4.5 ± 0.1 | 0% |
@@ -370,25 +370,25 @@ Negative examples are classified correctly in every analyzed run and length. Thi
 
 
 ![Target attention by length](./figures/final_report_target_attention_by_length.png)
-**Figure 1:** Target attention mass versus sequence length for five representative runs (mean over five seeds; shaded bands ±1 s.d.).
+**Figure 1:** Target attention mass versus sequence length for six representative runs (mean over five seeds; shaded bands ±1 s.d.).
 
 
 ![Positive logit by length](./figures/final_report_positive_logit_by_length.png)
-**Figure 2:** Positive logit versus sequence length for the same five runs (mean over five seeds; shaded bands ±1 s.d.; dashed line marks the logit-0 decision boundary).
+**Figure 2:** Positive logit versus sequence length for the same six runs (mean over five seeds; shaded bands ±1 s.d.; dashed line marks the logit-0 decision boundary).
 
 ### Constant Scaling
 
-Constant scaling uses $\alpha=1$, for which Background already gives $p_t(n)\to0$ at any fixed $\Delta$. Empirically, more training increases $\Delta$, moving the failure point outward without changing this asymptotic regime: positive accuracy at $10^7$ is 0 for all three budgets in every seed. The e1000 run makes this concrete: it learns a much larger margin than e50 or e100 and keeps more target attention at $10^7$, but its positive logit is still negative there, so the theory predicts eventual failure for any finite fixed margin.
+Constant scaling uses $\alpha=1$. At any fixed $\Delta$ this gives $p_t(n)\to0$. Empirically, more training increases $\Delta$, moving the failure point outward without changing this asymptotic regime: positive accuracy at $10^7$ is 0 for all three budgets in every seed. The e1000 run makes this concrete: it learns a much larger margin than e50 or e100 and keeps more target attention at $10^7$, but its positive logit is still negative there, so the theory predicts eventual failure for any finite fixed margin.
 
 ### Log Scaling
 
-The log run uses $\alpha=\log n$. The learned margin is $\Delta=4.4\pm0.1$, comfortably above the threshold $\Delta>1$ in every seed, so the theory predicts $p_t(n)\to1$, which is what is observed: target attention reaches 1.000 at long lengths, the positive logit stays positive, and positive accuracy is 1 at $10^7$ in all five seeds.
+Log scaling uses $\alpha=\log n$. The learned margin is $\Delta=4.4\pm0.1$, comfortably above the threshold $\Delta>1$ in every seed, so the theory predicts $p_t(n)\to1$, which is what is observed: target attention reaches 1.000 at long lengths, the positive logit stays positive, and positive accuracy is 1 at $10^7$ in all five seeds.
 
 ### Learned Log Scaling
 
-The learned-log runs separate finite-length success from asymptotic success. At 50 and 100 epochs the model already passes the $10^7$ benchmark, with positive accuracy 1 in all five seeds, yet its exponent stays below the threshold, $c\Delta=0.58\pm0.03$ and $0.83\pm0.05$ respectively, so the theory predicts eventual failure at larger lengths. Solving the closed-form $p_t(n)$ for the length at which it drops to the classifier's decision threshold makes this concrete: across seeds, the 50-epoch runs ($c\Delta\approx0.58$) are predicted to fail near $n\sim10^{8}$–$10^{9}$, only one to two orders of magnitude past the benchmark. The 100-epoch runs ($c\Delta\approx0.83$) are pushed beyond $n\sim10^{18}$, the failure length climbing steeply as $c\Delta\to1$. Only at 200 epochs does $c\Delta$ cross 1 ($1.14\pm0.06$, above 1 in all five seeds), entering the asymptotic-success regime; by 400 epochs it is well clear ($1.55\pm0.08$). The crossing is driven by the coefficient $c$, which grows monotonically with the training budget ($0.072\to0.096\to0.126\to0.166$) while the raw margin $\Delta$ grows only modestly ($8.1\to9.4$).
+Learned-log scaling uses $\alpha=1+c\log(1+n)$. These runs separate finite-length success from asymptotic success. At 50 and 100 epochs the model already passes the $10^7$ benchmark, with positive accuracy 1 in all five seeds, yet its exponent stays below the threshold, $c\Delta=0.58\pm0.03$ and $0.83\pm0.05$ respectively, so the theory predicts eventual failure at larger lengths. Solving the closed-form $p_t(n)$ for the length at which it drops to the classifier's decision threshold makes this concrete: across seeds, the 50-epoch runs ($c\Delta\approx0.58$) are predicted to fail near $n\sim10^{8}$–$10^{9}$, only one to two orders of magnitude past the benchmark. The 100-epoch runs ($c\Delta\approx0.83$) are pushed beyond $n\sim10^{18}$, the failure length climbing steeply as $c\Delta\to1$. Only at 200 epochs does $c\Delta$ exceed 1 in every seed ($1.14\pm0.06$), entering the asymptotic-success regime; by 400 epochs it is well clear ($1.55\pm0.08$). The crossing is driven by the coefficient $c$, which grows monotonically with the training budget ($0.072\to0.096\to0.126\to0.166$) while the raw margin $\Delta$ grows only modestly ($8.1\to9.4$).
 
-This is one of the main lessons of the experiment. Passing a finite benchmark such as $10^7$ does not certify unbounded-length generalization: two of our budgets clear $10^7$ with $c\Delta<1$. The reliable diagnostic is therefore whether $c\Delta$ exceeds 1, not accuracy at any single large length.
+The e50 and e100 budgets reach 100% at $10^7$ with $c\Delta<1$: a passing score at one length does not imply generalization to all lengths. What transfers is the threshold $c\Delta>1$, not accuracy at any single length.
 
 ## Mechanism: What The Model Learns
 
