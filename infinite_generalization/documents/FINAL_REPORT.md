@@ -392,7 +392,7 @@ Only at 200 epochs does $c\Delta$ exceed 1 in every seed ($1.14\pm0.06$), enteri
 
 The e50 and e100 budgets reach 100% at $10^7$ with $c\Delta<1$: passing at one length does not certify generalization to every length. The property that transfers is $c\Delta>1$, not accuracy at any single point.
 
-## Mechanism: What The Model Learns
+## Mechanism: What the Model Learns
 
 The reduced model also allows a direct weight-level explanation of where $\Delta$ comes from. Since the last input token is the non-target token $u$, the final query is $q_u$. Let $k_t$ be the target key and $k_u$ be the non-target key. Then
 
@@ -438,7 +438,7 @@ k_u=
 \end{bmatrix}.
 ```
 
-This gives
+With $d=2$, this gives
 
 ```math
 a\approx4.799,
@@ -448,7 +448,13 @@ b\approx-4.237,
 \Delta\approx9.036.
 ```
 
-Geometrically, $q_u$ points in a direction that separates the target key from the non-target key. The target key has a positive projection along the final query direction, while the non-target key has a negative projection. Equivalently, $q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the score pattern $a>b$ required by the two-score theory. The geometry is the same in every seed: across seeds 0-4 the target score $a$ is positive and the non-target score $b$ negative, $q_u$ is nearly collinear with $k_t-k_u$ (cosine $\geq0.99$), and $\Delta=9.03\pm0.28$.
+![Learned query/key geometry](./figures/final_report_mechanism_vectors.png)
+
+**Figure 3:** Learned query and key vectors for `learned_log_e200` (seed 1), drawn exactly in the $d=2$ query/key space.
+
+Geometrically (Figure 3), $q_u$ points in a direction that separates the target key from the non-target key. The target key has a positive projection along the final query direction, while the non-target key has a negative projection. Equivalently, $q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the score pattern $a>b$ required by the two-score structure.
+
+The geometry is the same in every seed: across seeds 0-4 the target score $a$ is positive and the non-target score $b$ negative, $q_u$ is nearly collinear with $k_t-k_u$ (cosine $\geq0.99$), and $\Delta=9.03\pm0.28$.
 
 This mechanism explains how the model creates a target advantage, but it also shows why a target advantage is not by itself enough. Under constant scaling, even a large fixed $\Delta$ is eventually overwhelmed by the growing number of non-target positions. Learned-log attention has an additional degree of freedom: it can increase the coefficient $c$ so that the effective margin grows like $c\Delta\log n$. In the successful learned-log run, optimization makes the product $c\Delta$ cross the threshold.
 
@@ -456,7 +462,7 @@ This mechanism explains how the model creates a target advantage, but it also sh
 
 The main contribution of this report is a controlled analysis of length-aware
 attention scaling in a trainable reduced model. The two-token,
-position-independent construction makes the two-score form expected by design;
+position-independent construction makes the two-score structure expected by design;
 it is not itself a learned discovery. This simplification lets us apply the
 closed-form target-attention equation directly and isolate the effect of the
 score multiplier from other transformer components.
