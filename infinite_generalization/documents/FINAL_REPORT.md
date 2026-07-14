@@ -47,8 +47,7 @@ The task uses a two-token vocabulary:
 
 A positive length-$n$ sequence, with $n\geq2$, contains one target token and
 $n-1$ non-target tokens. The token in the last position is always the
-non-target token $u$, and the readout query is formed from this last-position
-token, so positive and negative examples share the same query. The model has
+non-target token $u$. The model has
 no positional encoding, so permuting the tokens among the first $n-1$ positions
 does not change its output. We place the target in the first position only to
 make the notation easier to read; any position other than the last is
@@ -64,7 +63,7 @@ A negative length-$n$ sequence contains only non-target tokens:
 u, u, u, ..., u
 ```
 
-At a high level, the query at the last position scores every token in the
+At a high level, the query at the last position (the readout query) scores every token in the
 sequence, softmax converts those scores into attention weights, and the
 weighted sum of the token values is passed to a binary classifier.
 
@@ -126,6 +125,8 @@ A_j
 {\sum_{i=1}^{n}e^{\alpha(n)s_i}}.
 ```
 
+Since $\alpha(n)$ multiplies the scores inside the softmax, it acts as a
+length-dependent inverse temperature: larger $\alpha(n)$ sharpens the attention.
 Standard attention corresponds to $\alpha(n)=1$. The
 length-aware variants instead make $\alpha(n)$ grow with the sequence length. We
 consider three choices of $\alpha(n)$ — constant, logarithmic, and learned
@@ -180,12 +181,20 @@ o_{\text{neg}}(n)=[0,1].
 ```
 
 The negative output is this same combination with target mass $0$, so both
-outputs are fixed by the single scalar $p_t(n)$. Classification therefore
-reduces to a threshold on $p_t(n)$, and the classifier's logit increases with
-$p_t(n)$. If $p_t(n)\to0$, the positive representation converges to
+outputs are fixed by the single scalar $p_t(n)$. A learned linear layer reads
+this output, so on a positive example the classifier produces the logit
+
+```math
+z(n)=w_t\,p_t(n)+w_u\big(1-p_t(n)\big)+b=(w_t-w_u)\,p_t(n)+(w_u+b),
+```
+
+with learned weights $w_t,w_u$ and bias $b$, and predicts target-present when
+$z(n)\geq0$. Since the slope $w_t-w_u$ is positive in the trained model, the logit increases
+with $p_t(n)$, so classification reduces to a threshold: the model predicts
+target-present when $p_t(n)\geq p^{\ast}$, with $p^{\ast}=-(w_u+b)/(w_t-w_u)$. If $p_t(n)\to0$, the positive representation converges to
 the negative representation, and the representation margin between the two
 classes vanishes. If $p_t(n)$ converges to a constant strictly between 0 and 1,
-classification depends on the learned classifier's decision boundary. The
+classification depends on this threshold. The
 stronger, target-dominant outcome is $p_t(n)\to1$. The conditions below
 distinguish these three cases.
 
@@ -291,7 +300,7 @@ p_t(n)
 g(n)=\alpha(n)\Delta-\log(n-1),
 ```
 
-with $\sigma$ the logistic function, target attention converges to 1 exactly
+with $\sigma$ the sigmoid function, target attention converges to 1 exactly
 when $g(n)\to+\infty$, that is, when the scaled margin $\alpha(n)\Delta$ outgrows
 $\log(n-1)$ without bound. Since $\log(n-1)$ grows like $\log n$ with
 coefficient 1, the outcome is decided by how fast $\alpha(n)\Delta$ grows: it
@@ -306,7 +315,7 @@ to grow faster than the softmax denominator.
 
 The experiments train the reduced model derived above — fixed one-hot
 embeddings reused as value vectors, learned query and key projections
-$W_Q,W_K\in\mathbb{R}^{2\times2}$, a last-token query, softmax attention, and a
+$W_Q,W_K\in\mathbb{R}^{2\times2}$, a readout query, softmax attention, and a
 binary classifier on the two-dimensional attention output — and vary the
 score multiplier $\alpha(n)$ across three modes:
 
@@ -320,19 +329,18 @@ For `learned_log`, the coefficient is $c=\mathrm{softplus}(k_\alpha)$, where
 $k_\alpha$ is an unconstrained learnable scalar, so $c$ stays positive during
 optimization.
 
-The classifier is a learned linear layer $\mathbb{R}^2\to\mathbb{R}$ that maps
-the attention output $o(n)=(p_t(n),1-p_t(n))$ to a single logit. An example is
-classified target-present when this logit is at least 0 — equivalently, when its
-sigmoid probability is at least 0.5. Two quantities from this classifier appear
-in the results: the positive logit, the logit on a positive example, whose sign
-therefore decides whether that example is classified correctly; and the positive
-accuracy, the fraction of positive examples whose logit is at least 0.
+The classifier maps the attention output to the logit $z(n)$ introduced
+above; an example is classified target-present when $z(n)\geq0$, equivalently
+when its sigmoid probability is at least 0.5. Two quantities from the classifier
+appear in the results: the positive-example logit, the value of $z(n)$ on a
+positive example, whose sign decides whether that example is classified
+correctly; and the positive-example accuracy (equivalently, recall), the
+fraction of positive examples with $z(n)\geq0$.
 
 Each run trains at length 10 on 2000 examples split evenly between positive and
 negative, minimizing binary cross-entropy on the logit with AdamW (learning rate
 $3\times10^{-3}$, no weight decay, batch size 64). One epoch is a single pass over the 2000 examples, or 32 optimizer
-steps, so the 50-, 100-, 200-, 400-, and 1000-epoch budgets below correspond
-to 1600, 3200, 6400, 12800, and 32000 steps. Each configuration is trained
+steps. Each configuration is trained
 under five random seeds (0-4), and all reported numbers are the mean and
 standard deviation across these seeds.
 
@@ -346,17 +354,21 @@ Each run is labeled by its multiplier mode and epoch budget: for example,
 `constant_e50` is constant scaling trained for 50 epochs and `learned_log_e200`
 is learned-log scaling trained for 200 epochs. We analyze constant runs at 50,
 100, and 1000 epochs; one log run at 50 epochs; and learned-log runs at 50, 100, 200,
-and 400 epochs. These labels index the rows of Table 1 and the curves in both
-figures below.
+and 400 epochs. These labels index the rows of Table 1, which lists all eight
+runs. The figures below show a representative six: every constant budget (to
+trace the failure point moving outward), the log run, and the two learned-log
+budgets that bracket the $c\Delta=1$ threshold, `learned_log_e50` below and
+`learned_log_e200` above. The omitted `learned_log_e100` and `learned_log_e400`
+sit on the same sides and behave accordingly.
 
 ## Results
 
-In this task, length generalization is decided entirely by the positive examples. A negative sequence contains only non-target values, so the attention output stays in the non-target direction no matter how attention is spread across positions, and negatives are classified correctly in every analyzed run at every length. The difficulty lives in the positive examples: the target mass $p_t$ can dilute with length until the classifier no longer detects the target. Table 1 reports each run at $10^7$, and Figures 1 and 2 trace the target mass $p_t$ and the positive logit across length.
+In this task, length generalization is decided entirely by the positive examples. A negative sequence contains only non-target values, so the attention output stays in the non-target direction no matter how attention is spread across positions, and negatives are classified correctly in every analyzed run at every length. The difficulty lives in the positive examples: the target mass $p_t$ can dilute with length until the classifier no longer detects the target. Table 1 reports each run at $10^7$, and Figures 1 and 2 trace the target mass $p_t$ and the positive-example logit across length.
 
 **Table 1:** Main results at evaluation length $10^7$, as means over five seeds
 (± one standard deviation). Negative accuracy is 100% in every run.
 
-| Run | Steps | $\Delta$ | $c$ | $c\Delta$ | $p_t$ | Positive logit | Positive accuracy |
+| Run | Steps | $\Delta$ | $c$ | $c\Delta$ | $p_t$ | Positive-example logit | Positive-example accuracy |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `constant_e50` | 1600 | 9.0 ± 0.2 | n/a | n/a | 0.001 ± 0.000 | -3.3 ± 0.1 | 0% |
 | `constant_e100` | 3200 | 9.9 ± 0.2 | n/a | n/a | 0.002 ± 0.000 | -4.5 ± 0.1 | 0% |
@@ -370,23 +382,23 @@ In this task, length generalization is decided entirely by the positive examples
 
 
 ![Target attention by length](./figures/final_report_target_attention_by_length.png)
-**Figure 1:** Target attention mass versus sequence length for six representative runs (mean over five seeds; shaded bands ±1 s.d.).
+**Figure 1:** Target attention mass versus sequence length for six representative runs (mean over five seeds; shaded bands ±1 s.d.). Runs that generalize saturate at $p_t=1$ and coincide here (`log_e50` and `learned_log_e200` overlap, the latter dashed); Figure 2 separates them by positive-example logit.
 
 
-![Positive logit by length](./figures/final_report_positive_logit_by_length.png)
-**Figure 2:** Positive logit versus sequence length for the same six runs (mean over five seeds; shaded bands ±1 s.d.; dashed line marks the logit-0 decision boundary).
+![Positive-example logit by length](./figures/final_report_positive_logit_by_length.png)
+**Figure 2:** Positive-example logit versus sequence length for the same six runs (mean over five seeds; shaded bands ±1 s.d.; dashed line marks the logit-0 decision boundary).
 
 ### Constant Scaling
 
-Constant scaling uses $\alpha=1$. At any fixed $\Delta$ this gives $p_t(n)\to0$. Empirically, more training increases $\Delta$, moving the failure point outward without changing this asymptotic regime: positive accuracy at $10^7$ is 0 for all three budgets in every seed. The e1000 run makes this concrete: it learns a much larger margin than e50 or e100 and so retains more target attention at $10^7$, yet its positive logit there is the most negative of the three ($-17.3$). This is not a contradiction: the classifier head's weights grow in magnitude with training, so once the target mass has collapsed the logit is scaled to a large negative value. The larger margin only postpones the collapse, so the theory still predicts failure for any finite fixed margin.
+Constant scaling uses $\alpha=1$. At any fixed $\Delta$ this gives $p_t(n)\to0$. Empirically, more training increases $\Delta$, moving the failure point outward without changing this asymptotic regime: the positive-example accuracy at $10^7$ is 0 for all three budgets in every seed. The e1000 run makes this concrete: it learns a much larger margin than e50 or e100 and so retains more target attention at $10^7$, yet its positive-example logit there is the most negative of the three ($-17.3$). This is not a contradiction: with training the logit's slope $w_t-w_u$ and intercept $w_u+b$ (the negative-example logit) both grow in magnitude, so once the target mass has collapsed the positive-example logit is driven to a large negative value. The larger margin only postpones the collapse, so the theory still predicts failure for any finite fixed margin.
 
 ### Log Scaling
 
-Log scaling uses $\alpha=\log n$. The learned margin is $\Delta=4.4\pm0.1$, comfortably above the threshold $\Delta>1$ in every seed, so the theory predicts $p_t(n)\to1$, which is what is observed: target attention reaches 1.000 at long lengths, the positive logit stays positive, and positive accuracy is 1 at $10^7$ in all five seeds.
+Log scaling uses $\alpha=\log n$. The learned margin is $\Delta=4.4\pm0.1$, comfortably above the threshold $\Delta>1$ in every seed, so the theory predicts $p_t(n)\to1$, which is what is observed: target attention reaches 1.000 at long lengths, the positive-example logit stays positive, and the positive-example accuracy is 1 at $10^7$ in all five seeds.
 
 ### Learned Log Scaling
 
-Learned-log scaling uses $\alpha=1+c\log(1+n)$. These runs separate finite-length success from asymptotic success. At 50 and 100 epochs the model already passes the $10^7$ benchmark, with positive accuracy 1 in all five seeds, yet its exponent stays below the threshold, $c\Delta=0.58\pm0.03$ and $0.83\pm0.05$ respectively, so the theory predicts eventual failure at larger lengths. Solving the closed-form $p_t(n)$ for the length at which it drops to the classifier's decision threshold quantifies this: across seeds, the 50-epoch runs ($c\Delta\approx0.58$) are predicted to fail near $n\sim10^{8}$–$10^{9}$, only one to two orders of magnitude past the benchmark. The 100-epoch runs ($c\Delta\approx0.83$) are pushed beyond $n\sim10^{18}$, the failure length climbing steeply as $c\Delta\to1$.
+Learned-log scaling uses $\alpha=1+c\log(1+n)$. These runs separate finite-length success from asymptotic success. At 50 and 100 epochs the model already passes the $10^7$ benchmark, with positive-example accuracy 1 in all five seeds, yet its exponent stays below the threshold, $c\Delta=0.58\pm0.03$ and $0.83\pm0.05$ respectively, so the theory predicts eventual failure at larger lengths. Solving the closed-form $p_t(n)$ for the length at which it drops to the classifier's decision threshold quantifies this: across seeds, the 50-epoch runs ($c\Delta\approx0.58$) are predicted to fail near $n\sim10^{8}$–$10^{9}$, only one to two orders of magnitude past the benchmark. The 100-epoch runs ($c\Delta\approx0.83$) are pushed beyond $n\sim10^{18}$, the failure length climbing steeply as $c\Delta\to1$.
 
 Only at 200 epochs does $c\Delta$ exceed 1 in every seed ($1.14\pm0.06$), entering the asymptotic-success regime; by 400 epochs it is well clear ($1.55\pm0.08$). The crossing is driven by the coefficient $c$, which grows monotonically with the training budget ($0.072\to0.096\to0.126\to0.166$) while the raw margin $\Delta$ grows only modestly ($8.1\to8.6\to9.0\to9.4$).
 
@@ -394,7 +406,7 @@ The e50 and e100 budgets reach 100% at $10^7$ with $c\Delta<1$: passing at one l
 
 ## Mechanism: What the Model Learns
 
-The reduced model also allows a direct weight-level explanation of where $\Delta$ comes from. Since the last input token is the non-target token $u$, the final query is $q_u$. Let $k_t$ be the target key and $k_u$ be the non-target key. Then
+The reduced model also allows a direct weight-level explanation of where $\Delta$ comes from. Recall that the readout query is $q_u$ (the last token is always the non-target $u$), the target key is $k_t$, and the non-target key is $k_u$. The target and non-target scores are then
 
 ```math
 a
@@ -450,9 +462,9 @@ b\approx-4.237,
 
 ![Learned query/key geometry](./figures/final_report_mechanism_vectors.png)
 
-**Figure 3:** Learned query and key vectors for `learned_log_e200` (seed 1), drawn exactly in the $d=2$ query/key space.
+**Figure 3:** Learned query and key vectors for `learned_log_e200` (seed 1), drawn in the $d=2$ query/key space.
 
-Geometrically (Figure 3), $q_u$ points in a direction that separates the target key from the non-target key. The target key has a positive projection along the final query direction, while the non-target key has a negative projection. Equivalently, $q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the score pattern $a>b$ required by the two-score structure.
+Geometrically (Figure 3), $q_u$ points in a direction that separates the target key from the non-target key. The target key has a positive projection along the readout query direction, while the non-target key has a negative projection. Equivalently, $q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the score pattern $a>b$ required by the two-score structure.
 
 The geometry is the same in every seed: across seeds 0-4 the target score $a$ is positive and the non-target score $b$ negative, $q_u$ is nearly collinear with $k_t-k_u$ (cosine $\geq0.99$), and $\Delta=9.03\pm0.28$.
 
@@ -467,10 +479,14 @@ it is not itself a learned discovery. This simplification lets us apply the
 closed-form target-attention equation directly and isolate the effect of the
 score multiplier from other transformer components.
 
-The result also clarifies the difference between finite and asymptotic generalization. In constant mode, longer training increases the raw margin and pushes the failure length farther away, but it never changes the limit behavior. In learned-log mode, a run can pass length $10^7$ while still having $c\Delta<1$. This makes $c\Delta$ a more informative diagnostic than accuracy at a single large evaluation length.
+The result also sharpens the distinction between finite and asymptotic generalization. A run can clear a fixed length such as $10^7$ while its exponent $c\Delta$ still sits below 1, so passing a benchmark certifies only finite-length behavior, not the limit. What survives to unbounded length is a structural property of the learned solution, $c\Delta>1$, and exposing that property cleanly, rather than a single-length benchmark score, is what the reduced model is for.
 
-The reduced model is intentionally limited. It uses fixed semantic value vectors, no positional encodings, one final query, and a simple binary classifier. These restrictions make the mechanism easy to analyze, but they also mean that the conclusion should not be transferred directly to full transformers. A full transformer may have non-identical non-target scores, learned value vectors, multiple heads, residual streams, feed-forward layers, layer normalization, and pooling effects. Those components can break the exact two-score structure that makes the present analysis clean. The value of the reduced model is therefore diagnostic. It separates two questions that are entangled in a full transformer. First, can the architecture create a target-vs-non-target margin? Second, does the length-scaling mechanism
+The reduced model is intentionally limited. It uses fixed semantic value vectors, no positional encodings, one final query, and a simple binary classifier. These restrictions make the mechanism easy to analyze, but they also mean that the conclusion should not be transferred directly to full transformers. A full transformer may have non-identical non-target scores, learned value vectors, multiple heads, residual streams, feed-forward layers, layer normalization, and pooling effects. Those components can break the exact two-score structure that makes the present analysis clean.
+
+The value of the reduced model is therefore diagnostic. It separates two questions that are entangled in a full transformer. First, can the architecture create a target-vs-non-target margin? Second, does the length-scaling mechanism
 make that margin grow fast enough to beat the softmax denominator? In this controlled binary setting, the answer to both questions can be measured directly.
+
+Two directions follow. The first is to relax these restrictions toward a full transformer and test whether an analog of the $c\Delta>1$ condition still governs length generalization once non-identical non-target scores, learned values, and depth are reintroduced. The second is to move beyond binary detection to identity and counting variants of the task, which follow-on work in this project has begun to explore.
 
 ## Conclusion
 
