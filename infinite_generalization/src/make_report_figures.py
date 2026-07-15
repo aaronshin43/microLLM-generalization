@@ -1,7 +1,8 @@
-"""Regenerate the FINAL_REPORT figures from the multi-seed Stage 3 sweep.
+"""Regenerate the main FINAL_REPORT results figure.
 
-Mean curve over seeds 0-4 with a +/- std shaded band, at the 7 decade lengths
-(no 5e6). Writes vector PDF files for LaTeX and PNG files for Markdown preview.
+The two panels show mean curves over seeds 0-4 with a +/- standard-deviation
+band at the seven decade lengths (no 5e6). The script writes a vector PDF for
+LaTeX and a PNG preview for Markdown.
 """
 
 import csv
@@ -22,12 +23,12 @@ matplotlib.rcParams.update({
 
 BASE = Path("D:/03_Coding/microLLM-generalization/infinite_generalization")
 RUNS = BASE / "runs" / "stage3_seeds"
-OUT = BASE / "documents" / "figures"
+OUT = BASE / "documents" / "latex"
 SEEDS = [0, 1, 2, 3, 4]
 
-# (run label, color, linestyle) -- keep run->style identical across both figures.
+# (run label, color, linestyle) -- keep run->style identical across both panels.
 # learned_log_e200 is dashed so it stays visible where it coincides with log_e50
-# at p_t = 1 in the target-attention figure.
+# at p_t = 1 in the target-attention panel.
 RUN_SPECS = [
     ("constant_e50", "C0", "-"),
     ("constant_e100", "C1", "-"),
@@ -61,8 +62,7 @@ def series(per_len, key):
 DATA = {run: load_run(run) for run, *_ in RUN_SPECS}
 
 
-def plot(key, ylabel, title, stem, *, clip01=False, zero_line=False, legend_loc="best"):
-    fig, ax = plt.subplots(figsize=(5.5, 3.3))
+def plot_panel(ax, key, ylabel, title, *, clip01=False, zero_line=False):
     for run, color, linestyle in RUN_SPECS:
         lengths, means, stds = series(DATA[run], key)
         lo = [m - s for m, s in zip(means, stds)]
@@ -71,18 +71,52 @@ def plot(key, ylabel, title, stem, *, clip01=False, zero_line=False, legend_loc=
             lo = [max(0.0, v) for v in lo]
             hi = [min(1.0, v) for v in hi]
         ax.plot(lengths, means, marker="o", color=color, label=run,
-                linewidth=1.4, markersize=3.8, linestyle=linestyle)
+                linewidth=1.15, markersize=3.1, linestyle=linestyle)
         ax.fill_between(lengths, lo, hi, color=color, alpha=0.15, linewidth=0)
     if zero_line:
         ax.axhline(0.0, color="black", linewidth=1, linestyle="--")
     ax.set_xscale("log")
-    ax.set_xlabel("Sequence length $n$")
-    ax.set_ylabel(ylabel)
-    ax.set_title(title, fontsize=10)
+    ax.set_ylabel(ylabel, fontsize=8.5)
+    ax.set_title(title, fontsize=9)
     ax.grid(True, alpha=0.25)
-    ax.tick_params(labelsize=8)
-    ax.legend(ncol=2, fontsize=7.2, loc=legend_loc)
+    ax.tick_params(labelsize=7)
+    if clip01:
+        ax.set_ylim(-0.03, 1.03)
 
+
+def plot_combined():
+    fig, axes = plt.subplots(1, 2, figsize=(5.5, 3.05), sharex=True)
+    plot_panel(
+        axes[0],
+        "att",
+        "Target attention mass $p_t$",
+        "(a) Target attention mass",
+        clip01=True,
+    )
+    plot_panel(
+        axes[1],
+        "logit",
+        "Positive-example logit $z$",
+        "(b) Positive-example logit",
+        zero_line=True,
+    )
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.supxlabel("Sequence length $n$", fontsize=8.5, y=0.145)
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.01),
+        ncol=3,
+        fontsize=6.3,
+        frameon=False,
+        handlelength=2.3,
+        columnspacing=1.0,
+    )
+    fig.subplots_adjust(left=0.095, right=0.99, top=0.88, bottom=0.31, wspace=0.34)
+
+    stem = "final_report_attention_and_logit_by_length"
     pdf_path = OUT / f"{stem}.pdf"
     png_path = OUT / f"{stem}.png"
     fig.savefig(pdf_path, bbox_inches="tight", pad_inches=0.02)
@@ -92,7 +126,4 @@ def plot(key, ylabel, title, stem, *, clip01=False, zero_line=False, legend_loc=
     print(f"wrote {png_path}")
 
 
-plot("att", "Target attention mass $p_t$", "Target attention by sequence length",
-     "final_report_target_attention_by_length", clip01=True, legend_loc="lower left")
-plot("logit", "Positive-example logit $z$", "Positive-example logit by sequence length",
-     "final_report_positive_logit_by_length", zero_line=True, legend_loc="lower left")
+plot_combined()
