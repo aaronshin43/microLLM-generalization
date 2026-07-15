@@ -2,17 +2,17 @@
 
 ## Abstract
 
-Softmax-attention classifiers trained on short sequences can fail at much longer lengths, even when detecting a single target token, because that token shares a fixed attention budget with a growing crowd of non-targets. We ask when length-aware attention overcomes this dilution in an exactly analyzable reduced binary classifier: one readout query attends to one-hot token embeddings, and identical non-targets yield a closed form for target attention. We compare constant, logarithmic, and learned logarithmic scaling. Across all three, unbounded-length generalization requires amplification of the target's score margin until its unnormalized attention weight outgrows the aggregate weight of the non-targets. Constant scaling never does; logarithmic scaling does when the learned margin is large enough; learned logarithmic scaling does only when training makes the amplification sufficiently fast. Consequently, a model can pass a benchmark of ten million tokens yet still be predicted to fail later, because no single finite benchmark reveals the quantity that determines unbounded-length behavior.
+Softmax-attention classifiers trained on short sequences can fail at much longer lengths, even on a single-target detection task, because the target shares a fixed attention budget with a growing crowd of non-targets. We ask when length-aware attention overcomes this dilution in an exactly analyzable reduced binary classifier, where one readout query attends to one-hot token embeddings and identical non-targets yield a closed form for target attention. We compare constant, logarithmic, and learned logarithmic scaling. As sequences grow, the target eventually receives essentially all attention only when its unnormalized weight outgrows the non-targets' aggregate weight. Constant scaling never reaches this limit; logarithmic scaling does when the learned target score advantage is large enough; learned logarithmic scaling does when training makes amplification grow fast enough. Below the growth threshold, positive classification eventually fails; at equality, correctness depends on the learned decision threshold. A model may pass at ten million tokens yet be predicted to fail later: finite-length accuracy alone cannot establish unbounded-length behavior.
 
 ## Introduction
 
-Length generalization is a basic difficulty for sequence models. A classifier can fit short training sequences while relying on a mechanism that does not remain valid at longer sequence lengths. This problem appears even in simple existential target-token tasks, where the model only needs to decide whether a sequence contains a particular token.
+Length generalization is a basic difficulty for sequence models: a classifier can fit short training sequences using a mechanism that fails at longer lengths. The problem appears even in an existential target-token task, where the model only decides whether a sequence contains a particular token.
 
-The motivating failure mode is attention dilution. Softmax attention divides a fixed budget of attention among all tokens, so a single target token must compete with a crowd of non-targets that grows with the sequence; even a fixed per-token margin for the target can be overwhelmed once that crowd is large enough. This raises a simple question: can attention be made length-aware, sharpening as the sequence grows, so that the target keeps enough attention at long lengths?
+The motivating failure mode is attention dilution. Softmax attention divides a fixed budget of attention among all tokens, so a single target token must compete with a crowd of non-targets that grows with the sequence; even a fixed score advantage for the target over each non-target can be overwhelmed once that crowd is large enough. This raises a simple question: can attention be made length-aware, sharpening as the sequence grows, so that the target keeps enough attention at long lengths?
 
-To answer this question, the report studies an intentionally reduced binary classifier with fixed one-hot token values, learned query and key projections, one readout query at the last position, and a binary classifier. Identical non-target tokens force all non-target attention scores to be equal, giving exactly the two-score structure assumed by the closed-form theory. The target-attention expression is therefore exact, allowing a controlled test of a trainable model whose assumptions can be checked directly; the aim is not to propose a competitive architecture.
+To answer this question, the report studies an intentionally reduced binary classifier with fixed one-hot token values, learned query and key projections, one readout query at the last position, and a linear classifier. Identical non-targets make their attention scores equal, exactly realizing the closed-form theory's two-score structure. The central intervention is a score multiplier controlling how sharply attention concentrates as length grows. The target-attention expression is therefore exact, allowing a controlled test of a trainable model with directly checkable assumptions; the aim is not to propose a competitive architecture.
 
-The report compares three scaling rules that govern how fast attention sharpens as the sequence grows: constant, logarithmic, and learned logarithmic. The experiments play out as the theory predicts. Constant scaling improves with more training but always fails eventually. Log scaling succeeds once the score margin the model learns exceeds 1. Learned-log scaling reaches full target dominance only when optimization drives the product of the learned coefficient and the score margin above 1. This last regime carries the report's main lesson: a model can pass a finite benchmark, such as sequences of ten million tokens, yet still be predicted to fail at larger lengths whenever that product, which the benchmark alone cannot reveal, stays below 1. Passing a fixed length is therefore not evidence of unbounded-length generalization; the target's unnormalized attention weight must outgrow the aggregate weight of the competing non-targets.
+Experiments across constant, logarithmic, and learned logarithmic scaling match the theory: constant scaling only postpones failure. With log scaling, a target score advantage above 1 makes the target receive essentially all attention at arbitrarily long lengths; learned-log does so once the product of its coefficient and this advantage exceeds 1. A run may still pass at ten million tokens when this product is below 1, although its learned parameters imply eventual failure. No finite benchmark establishes generalization to all lengths: unbounded-length behavior is determined by the target's unnormalized weight relative to the aggregate non-target weight and, at equality, by the learned threshold.
 
 ## Related Work
 
@@ -188,7 +188,7 @@ target-present when $p_t(n)\geq p^{\ast}$, with $p^{\ast}=-(w_u+\beta)/(w_t-w_u)
 the negative representation, and the representation gap between the two
 classes vanishes. If $p_t(n)$ converges to a constant strictly between 0 and 1,
 classification depends on this threshold. The
-stronger, target-dominant outcome is $p_t(n)\to1$. The conditions below
+stronger outcome is $p_t(n)\to1$. The conditions below
 distinguish these three cases.
 
 ### Length-Scaling Regimes
@@ -252,7 +252,7 @@ For the learned-log multiplier used in the experiments,
 
 where $c$ is a learned, strictly positive coefficient. In the formal limit
 $c\to0$, $\alpha(n)\to1$, recovering the constant baseline. Using $\log(1+n)$
-keeps the multiplier well-defined at small $n$; neither term changes the
+keeps the multiplier well-defined at small $n$; neither choice changes the
 asymptotic exponent, which is governed by $c\Delta$. Since
 $e^{\alpha(n)\Delta}=e^\Delta(1+n)^{c\Delta}$, the target attention mass is
 
@@ -299,10 +299,10 @@ $\log(n-1)$ without bound. Since $\log(n-1)$ grows like $\log n$ with
 coefficient 1, the outcome is decided by how fast $\alpha(n)\Delta$ grows: it
 stays bounded for the constant baseline, so target attention always collapses,
 and grows like $\Delta\log n$ for the log multiplier and $c\Delta\log n$ for the
-learned-log multiplier. Target dominance therefore needs the coefficient of
-$\log n$ to exceed 1, giving the thresholds $\Delta>1$ and $c\Delta>1$. This is
-the precise sense in which length generalization requires the effective margin
-to grow faster than the logarithm of the number of competing non-target keys.
+learned-log multiplier. Thus $p_t(n)\to1$ exactly when the coefficient of
+$\log n$ exceeds 1, giving the thresholds $\Delta>1$ and $c\Delta>1$.
+Equivalently, the effective margin must grow faster than the logarithm of the
+number of competing non-target keys.
 
 ## Experimental Design
 
@@ -326,10 +326,21 @@ correctness because $z(n)\geq0$ (sigmoid probability at least 0.5) means
 target-present, and accuracy (equivalently, recall), the fraction of positive
 examples satisfying this condition.
 
+At each length, the fixed target position and two-token vocabulary yield only
+the positive and negative sequences defined above. The balanced datasets repeat
+these two inputs equally, so positive accuracy within a seed is necessarily 0%
+or 100%.
+
 Each run trains at length 10 on 2000 balanced examples using binary
 cross-entropy and AdamW (learning rate $3\times10^{-3}$, no weight decay, batch
 size 64), giving 32 optimizer steps per epoch. We use five random seeds (0-4)
 and report continuous quantities as means and standard deviations.
+
+After setting each run seed, all linear weights are initialized independently
+from $\mathcal U(-1/\sqrt{2},1/\sqrt{2})$; the classifier bias uses the same
+distribution, while the query and key projections have no bias. In
+`learned_log`, $k_\alpha$ is initialized to $-5$, so
+$c=\mathrm{softplus}(-5)\approx0.0067$.
 
 Each trained model is evaluated on 50 balanced examples at every power of ten
 from $10$ to $10^7$, six orders of magnitude beyond the training length.
@@ -345,7 +356,7 @@ the omitted `learned_log_e100` and `learned_log_e400` fall on the same sides.
 
 ## Results
 
-In this task, length generalization is determined entirely by the positive examples: negative examples always output $[0,1]$, independent of attention spread, and $p^{\ast}>0$ keeps them correct at every length. Only positive examples can fail as $p_t$ dilutes. Table 1 reports each run at $10^7$, while Figure 1 traces $p_t$ in panel (a) and the positive-example logit in panel (b).
+In this task, length generalization is determined entirely by the positive examples: negative examples always output $[0,1]$, independent of attention spread, and $p^{\ast}>0$ keeps them correct at every length. Only positive examples can fail as $p_t$ dilutes. All eight runs attain 100% positive-example accuracy at the training length $n=10$ in every seed. Table 1 reports each run at $10^7$, while Figure 1 traces $p_t$ in panel (a) and the positive-example logit in panel (b).
 
 **Table 1:** Main results at $n=10^7$. Continuous quantities are reported as
 means over five seeds (± one standard deviation); within each run, accuracy was
@@ -367,7 +378,7 @@ negative accuracy is 100% in every run.
 
 
 ![Target attention and positive-example logit by length](./latex/final_report_attention_and_logit_by_length.png)
-**Figure 1:** Target attention mass and positive-example logit versus sequence length for six representative runs (mean over five seeds; shaded bands show ±1 s.d.). (a) Runs that reach target dominance saturate near $p_t=1$, so `log_e50` and `learned_log_e200` overlap, with the latter dashed. (b) The logit curves distinguish these overlapping runs; the horizontal dashed line at $z=0$ marks the decision boundary.
+**Figure 1:** Target attention mass and positive-example logit versus sequence length for six representative runs (mean over five seeds; shaded bands show ±1 s.d.). (a) Runs for which $p_t(n)\to1$ saturate near $p_t=1$, so `log_e50` and `learned_log_e200` overlap, with the latter dashed. (b) The logit curves distinguish these overlapping runs; the horizontal dashed line at $z=0$ marks the decision boundary.
 
 ### Constant Scaling
 
@@ -379,9 +390,11 @@ Log scaling uses $\alpha=\log n$. The score margin is $\Delta=4.4\pm0.1$, comfor
 
 ### Learned-Log Scaling
 
-Learned-log scaling uses $\alpha=1+c\log(1+n)$. These runs separate finite-length success from asymptotic success. At 50 and 100 epochs the model already passes the $10^7$ benchmark, with positive-example accuracy 100% in all five seeds, yet the product $c\Delta$ stays below the threshold, $0.58\pm0.03$ and $0.83\pm0.05$ respectively, so the theory predicts eventual failure at larger lengths. Solving the closed-form $p_t(n)$ for the length at which target attention drops to the classifier's per-seed decision threshold $p^{\ast}$ quantifies this (derivation in Appendix A): across seeds, the 50-epoch runs ($c\Delta\approx0.58$) are predicted to fail near $n\sim10^{8}$–$10^{9}$, within about two orders of magnitude of the benchmark. The 100-epoch runs ($c\Delta\approx0.83$) are pushed beyond $n\sim10^{18}$, the failure length climbing steeply as $c\Delta\to1^{-}$.
+Learned-log scaling uses $\alpha=1+c\log(1+n)$. These runs separate finite-length classification success from convergence of target attention to one. At 50 and 100 epochs the model already passes the $10^7$ benchmark, with positive-example accuracy 100% in all five seeds, yet the product $c\Delta$ stays below the threshold, $0.58\pm0.03$ and $0.83\pm0.05$ respectively, so the theory predicts eventual failure at larger lengths. Solving the closed-form $p_t(n)$ for the length at which target attention drops to the classifier's per-seed decision threshold $p^{\ast}$ quantifies this (derivation in Appendix A.2): across seeds, the 50-epoch runs ($c\Delta\approx0.58$) are predicted to fail near $n\sim10^{8}$–$10^{9}$, within about two orders of magnitude of the benchmark. The 100-epoch runs ($c\Delta\approx0.83$) are pushed beyond $n\sim10^{18}$, the failure length climbing steeply as $c\Delta\to1^{-}$.
 
-Only at 200 epochs does $c\Delta$ exceed 1 in every seed ($1.14\pm0.06$, smallest seed value 1.08), entering the asymptotic-success regime; by 400 epochs it is well clear ($1.55\pm0.08$, smallest 1.46). The crossing is driven by the coefficient $c$, which grows monotonically with the training budget ($0.072\to0.096\to0.126\to0.166$) while the score margin $\Delta$ grows only modestly ($8.1\to8.6\to9.0\to9.4$).
+Only at 200 epochs does $c\Delta$ exceed 1 in every seed ($1.14\pm0.06$, smallest seed value 1.08), entering the $p_t(n)\to1$ regime; by 400 epochs it is well clear ($1.55\pm0.08$, smallest 1.46).
+
+The crossing is driven by the coefficient $c$, which grows monotonically with the training budget ($0.072\to0.096\to0.126\to0.166$) while the score margin $\Delta$ grows only modestly ($8.1\to8.6\to9.0\to9.4$).
 
 The e50 and e100 budgets reach 100% at $10^7$ with $c\Delta<1$: passing at one length does not certify generalization to every length. The property that transfers is the growth rate $c\Delta$, not accuracy at any single point. Table 1 shows this directly: `constant_e50` and `learned_log_e200` learn the same score margin ($\Delta=9.0$), yet the first collapses ($p_t=0.001$, 0%) and the second saturates ($p_t=1.000$, 100%). The difference comes from the length scaling, not from $\Delta$.
 
@@ -434,8 +447,9 @@ b\approx-4.237,
 
 **Figure 2:** Learned query and key vectors for `learned_log_e200` (seed 1), drawn in the $d=2$ query/key space.
 
-Figure 2 visualizes one parameterization of the learned solution. In this
-representation, $q_u$ is nearly collinear with $k_t-k_u$: the target key has a
+Figure 2 visualizes one parameterization of the learned solution.
+
+In this representation, $q_u$ is nearly collinear with $k_t-k_u$: the target key has a
 positive projection along the readout-query direction, whereas the non-target
 key has a negative projection. This geometry produces $a>b$ and hence a
 positive score margin $\Delta$.
@@ -454,9 +468,10 @@ remain unchanged, even though the angles between the transformed vectors may
 differ. Figure 2 therefore shows one learned representation of the score
 separation, not a geometry required by the task.
 
-The invariant mechanism is therefore the score separation itself. Across seeds 0-4, the
-target score is positive, the non-target score is negative, and
-$\Delta=9.03\pm0.28$. The cosine similarity is also at least 0.99 in every seed,
+The invariant mechanism is therefore the score separation itself. For
+`learned_log_e200` across seeds 0-4, the target score is positive, the
+non-target score is negative, and $\Delta=9.03\pm0.28$. The cosine similarity
+between $q_u$ and $k_t-k_u$ is also at least 0.99 in every seed,
 showing that this training setup consistently reaches a similarly aligned
 parameterization, but the cosine is not a functionally necessary condition.
 
@@ -464,7 +479,7 @@ This separation connects the learned weights to the length-scaling analysis.
 The query and key projections create the target advantage $\Delta$, while the
 multiplier determines whether that advantage survives the growing number of
 non-target positions. Under constant scaling, the growing non-target mass
-eventually overwhelms any finite $\Delta$; log scaling reaches target dominance
+eventually overwhelms any finite $\Delta$; log scaling gives $p_t(n)\to1$
 when $\Delta>1$; learned-log scaling does so when $c\Delta>1$.
 
 ## Discussion
@@ -473,7 +488,7 @@ The report's controlled, trainable two-token construction makes the two-score
 structure hold by design, so the exact target-attention equation isolates
 length-aware scaling from other transformer components.
 
-The closed form also settles a question the experiments leave open: whether a longer benchmark could decide the cases that the $10^7$ evaluation cannot. The predicted failure length grows sharply as $c\Delta\to1^{-}$, so a longer benchmark helps only well below the threshold: the 50-epoch runs ($c\Delta\approx0.58$) fail within about two orders of magnitude of the current evaluation and could be caught, whereas the 100-epoch runs ($c\Delta\approx0.83$) are predicted to survive to $\sim10^{18}$ or beyond. Near the threshold, finite benchmarks are least informative: no reachable length can distinguish a very late failure from true target dominance, so the asymptotic regime must instead be inferred from the learned parameters and the closed form.
+The closed form also settles a question the experiments leave open: whether a longer benchmark could decide the cases that the $10^7$ evaluation cannot. The predicted failure length grows sharply as $c\Delta\to1^{-}$, so a longer benchmark helps only well below the threshold: the 50-epoch runs ($c\Delta\approx0.58$) fail within about two orders of magnitude of the current evaluation and could be caught, whereas the 100-epoch runs ($c\Delta\approx0.83$) are predicted to survive to $\sim10^{18}$ or beyond. Near the threshold, finite benchmarks are least informative: no reachable length can distinguish a very late failure from a run whose target attention converges to one, so the asymptotic regime must instead be inferred from the learned parameters and the closed form.
 
 Those learned parameters, however, are not individually identified by the training objective. Because every run trains only at length 10, the objective constrains $c$ and $\Delta$ only through the effective margin $\alpha(10)\Delta=\Delta+(c\Delta)\log 11$. Different pairs $(c,\Delta)$ can therefore produce the same attention and training loss at that length while implying different asymptotic behavior. The observed decomposition, in which $c$ increases steadily while $\Delta$ changes more slowly, reflects the optimizer, initialization, and parameterization rather than a uniquely determined solution.
 
@@ -483,11 +498,11 @@ Beyond these optimization caveats, the reduced model is intentionally limited. I
 
 The reduced model is therefore diagnostic: it separates whether the architecture can create a score margin $\Delta$ from whether length scaling makes the effective margin grow fast enough to beat the softmax denominator. Both questions are directly measurable in this controlled setting.
 
-Two directions follow: test whether an analog of $c\Delta>1$ survives in fuller transformers with non-identical non-target scores, learned values, and depth, and extend the task beyond binary detection to target identification or counting.
+Two directions follow: test whether an analog of the condition $c\Delta>1$ for target attention to converge to one survives in fuller transformers with non-identical non-target scores, learned values, and depth, and extend the task beyond binary detection to target identification or counting.
 
 ## Conclusion
 
-This report studied length generalization in a reduced binary attention classifier whose two-score structure yields an exact closed-form expression for target attention. Across the three scaling rules, the experiments give a consistent picture: constant scaling fails at sufficiently large lengths, whereas log and learned-log scaling reach full target dominance only when their effective margins outgrow the competing crowd, requiring $\Delta>1$ and $c\Delta>1$, respectively. Below those thresholds, attention collapses. Thus, in this reduced setting, the limit is determined not by the training length or any finite benchmark, but by how fast the effective margin grows relative to the logarithm of the number of competing non-target keys.
+This report studied length generalization in a reduced binary attention classifier whose two-score structure yields an exact closed-form expression for target attention. Across the three scaling rules, the experiments give a consistent picture: constant scaling fails at sufficiently large lengths, whereas log and learned-log scaling make target attention converge to one only when the target's unnormalized weight outgrows the aggregate weight of the non-targets, requiring $\Delta>1$ and $c\Delta>1$, respectively. Below those thresholds, attention collapses; at equality, the limiting target mass is nonzero and classification depends on the learned decision boundary. Thus, in this reduced setting, the limit is determined not by the training length or any finite benchmark, but by how fast the effective margin grows relative to the logarithm of the number of competing non-target keys.
 
 ## Appendix A: Supporting Material
 
@@ -569,7 +584,7 @@ and drafted and revised the report prose.
 
 The research direction and final decisions remained human. The author chose the
 research questions, ran the experiments, derived the closed-form attention
-analysis and the $c\Delta>1$ threshold, selected the analyses to report, and
+analysis and the learned-log convergence condition $c\Delta>1$, selected the analyses to report, and
 directed the AI assistants. The reduced model was proposed by the project
 advisor, who also reviewed the manuscript and set the scope of the main text.
 The author reviewed and tested AI-generated code, checked every reported value
