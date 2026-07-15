@@ -77,21 +77,13 @@ ax.set_ylim(-2.3, 3.9)
 ax.grid(True, alpha=0.22)
 ax.set_xlabel("coordinate 1", fontsize=9)
 ax.set_ylabel("coordinate 2", fontsize=9)
-ax.set_title("Learned query/key geometry (learned_log_e200, seed 1)", fontsize=9.5)
+ax.set_title("Learned query/key geometry", fontsize=9.5)
 ax.tick_params(labelsize=8)
 
 # legend carries identity (arrows bunch, so direct labels would collide)
 handles = [Line2D([0], [0], color=col, lw=2.4, label=lab) for lab, _v, col in VECS]
 handles.append(Line2D([0], [0], color="gray", ls="--", lw=1.0, label="$q_u$ direction"))
 ax.legend(handles=handles, loc="upper right", fontsize=7.8, framealpha=0.9)
-
-# numeric facts, tying the picture to the text
-note = (r"$\cos(q_u,\,k_t-k_u)=0.995$" + "\n"
-        r"$a=q_u^\top k_t/\sqrt{2}=+4.80$" + "\n"
-        r"$b=q_u^\top k_u/\sqrt{2}=-4.24$")
-ax.text(0.02, 0.02, note, transform=ax.transAxes, fontsize=7.3,
-        va="bottom", ha="left",
-        bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="gray", alpha=0.9))
 
 pdf_path = OUT / "final_report_mechanism_vectors.pdf"
 png_path = OUT / "final_report_mechanism_vectors.png"
