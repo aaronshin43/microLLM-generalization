@@ -18,3 +18,10 @@ preview.md
 preview2.md
 weeklylog.md
 guidline.md
+
+# Latex
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
