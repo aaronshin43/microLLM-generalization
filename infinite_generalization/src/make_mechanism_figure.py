@@ -25,6 +25,7 @@ matplotlib.rcParams.update({
 })
 
 OUT = Path("D:/03_Coding/microLLM-generalization/infinite_generalization/documents/figures")
+OUT2 = Path("D:/03_Coding/microLLM-generalization/infinite_generalization/documents/latex")
 
 # learned_log_e200, seed 1 (matches the vectors printed in the Mechanism section)
 q_u = np.array([-1.830, 1.646])
@@ -85,7 +86,7 @@ handles = [Line2D([0], [0], color=col, lw=2.4, label=lab) for lab, _v, col in VE
 handles.append(Line2D([0], [0], color="gray", ls="--", lw=1.0, label="$q_u$ direction"))
 ax.legend(handles=handles, loc="upper right", fontsize=7.8, framealpha=0.9)
 
-pdf_path = OUT / "final_report_mechanism_vectors.pdf"
+pdf_path = OUT2 / "final_report_mechanism_vectors.pdf"
 png_path = OUT / "final_report_mechanism_vectors.png"
 fig.savefig(pdf_path, bbox_inches="tight", pad_inches=0.02)
 fig.savefig(png_path, dpi=300, bbox_inches="tight", pad_inches=0.02)
