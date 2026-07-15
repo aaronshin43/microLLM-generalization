@@ -69,22 +69,34 @@ u \mapsto [0,1].
 A length-$n$ sequence is thus represented by a one-hot matrix
 $X\in\mathbb{R}^{n\times2}$ with one token embedding per row. The learned query
 and key projections are $Q=XW_Q$ and $K=XW_K$ with
-$W_Q,W_K\in\mathbb{R}^{2\times d}$, so $Q,K\in\mathbb{R}^{n\times d}$ and
-$q_{\mathrm{last}}$ is the last row of $Q$. Here $d$ is the query and key
-dimension, set to $d=2$ throughout. Conventional self-attention
-forms the full $n\times n$ score matrix $QK^\top/\sqrt d$. This reduced
-classifier uses only the query at the last position and therefore needs only
-its scores against the $n$ keys:
+$W_Q,W_K\in\mathbb{R}^{2\times d}$, so $Q,K\in\mathbb{R}^{n\times d}$. Let
+$q_i,k_i\in\mathbb{R}^d$ denote column vectors whose transposes are the
+corresponding rows of $Q$ and $K$: $q_i^\top=Q_{i,:}$ and
+$k_i^\top=K_{i,:}$. We write $q_{\mathrm{last}}=q_n$. Here $d$ is the query and
+key dimension, set to $d=2$ throughout. Conventional self-attention forms the
+full $n\times n$ score matrix $QK^\top/\sqrt d$, whose $(i,j)$ entry is
+$q_i^\top k_j/\sqrt d$. This reduced classifier uses only the query at the last
+position and therefore needs only its scores against the $n$ keys:
 
 ```math
 s_j=\frac{q_{\mathrm{last}}^\top k_j}{\sqrt d},
 \qquad j=1,\ldots,n.
 ```
 
-Since the token in the last position is $u$, $q_{\mathrm{last}}=q_u$ for every
-example. Writing $k_t$ and $k_u$ for the target and non-target keys, which are
-position-independent, the target and non-target scores, and the score margin
-between them, are
+Because the embeddings are one-hot, they select the corresponding rows of the
+projection matrices:
+
+```math
+q_u^\top=[0,1]W_Q,
+\qquad
+k_t^\top=[1,0]W_K,
+\qquad
+k_u^\top=[0,1]W_K.
+```
+
+These token-specific vectors are position-independent. Since the token in the
+last position is $u$, $q_{\mathrm{last}}=q_u$ for every example. The target and
+non-target scores, and the score margin between them, are
 
 ```math
 a=\frac{q_u^\top k_t}{\sqrt d},
@@ -382,7 +394,7 @@ Only at 200 epochs does $c\Delta$ exceed 1 in every seed ($1.14\pm0.06$, smalles
 
 The e50 and e100 budgets reach 100% at $10^7$ with $c\Delta<1$: passing at one length does not certify generalization to every length. The property that transfers is the growth rate $c\Delta$, not accuracy at any single point. Table 1 shows this directly: `constant_e50` and `learned_log_e200` learn the same score margin ($\Delta=9.0$), yet the first collapses ($p_t=0.001$, 0%) and the second saturates ($p_t=1.000$, 100%). The difference comes from the length scaling, not from $\Delta$.
 
-## Mechanism: What the Model Learns
+## Mechanism: The Learned Score Separation
 
 The reduced model also allows a direct weight-level explanation of where $\Delta$ comes from. Recall that the readout query is $q_u$ (the last token is always the non-target $u$), the target key is $k_t$, and the non-target key is $k_u$. The target and non-target scores are then
 
@@ -442,11 +454,34 @@ b\approx-4.237,
 
 **Figure 2:** Learned query and key vectors for `learned_log_e200` (seed 1), drawn in the $d=2$ query/key space.
 
-Geometrically (Figure 2), $q_u$ points in a direction that separates the target key from the non-target key: the target key has a positive projection along the readout query direction, the non-target key has a negative one, and $q_u$ is nearly collinear with the difference vector $k_t-k_u$. What the length-scaling analysis needs is not this alignment but the scalar it produces, $\Delta=q_u^\top(k_t-k_u)/\sqrt d$. The alignment is a property of the parameterization rather than of the function computed: replacing $W_Q$ and $W_K$ by $W_QM$ and $W_KM^{-\top}$ for any invertible $M$ leaves every score, and therefore $\Delta$ and the model, unchanged while changing the cosine. Figure 2 shows the geometry of the solution the optimizer found, not a form the task forces.
+Figure 2 visualizes one parameterization of the learned solution. In this
+representation, $q_u$ is nearly collinear with $k_t-k_u$: the target key has a
+positive projection along the readout-query direction, whereas the non-target
+key has a negative projection. This geometry produces $a>b$ and hence a
+positive score margin $\Delta$.
 
-What is reproducible across seeds is the score separation itself: for seeds 0-4 the target score $a$ is positive, the non-target score $b$ negative, and $\Delta=9.03\pm0.28$. Within this training setup the optimizer also reaches the same aligned parameterization every time (cosine $\geq0.99$).
+The visible alignment, however, is not uniquely determined by the function
+computed by the model. For any invertible matrix $M$, we can replace $W_Q$ and
+$W_K$ by $W_QM$ and $W_KM^{-\top}$. These are compensating coordinate changes:
+$M$ changes the query coordinates, while $M^{-\top}$ applies the corresponding
+inverse change to the key coordinates. Their effects cancel in every query-key
+dot product, leaving $W_QW_K^\top$, every attention score, $\Delta$, and the
+model predictions unchanged, even though the angles between the vectors may
+change. Figure 2 therefore shows how the optimizer chose to represent the
+learned scores, not a geometry required by the task.
 
-This mechanism explains how the model creates a target advantage, but it also shows why a target advantage is not by itself enough. Under constant scaling, even a large fixed $\Delta$ is eventually overwhelmed by the growing number of non-target positions. Learned-log attention has an additional degree of freedom: it can increase the coefficient $c$ so that the effective margin grows like $c\Delta\log n$. In the successful learned-log run, optimization makes the product $c\Delta$ cross the threshold.
+The invariant mechanism is the score separation itself. Across seeds 0-4, the
+target score is positive, the non-target score is negative, and
+$\Delta=9.03\pm0.28$. The cosine similarity is also at least 0.99 in every seed,
+showing that this training setup consistently reaches a similarly aligned
+parameterization, but the cosine is not a functionally necessary condition.
+
+This separation connects the learned weights to the length-scaling analysis.
+The query and key projections create the target advantage $\Delta$, while the
+multiplier determines whether that advantage survives the growing number of
+non-target positions. Under constant scaling, any finite $\Delta$ is eventually
+overwhelmed. Under learned-log scaling, $c\Delta>1$ makes the amplified margin
+outgrow the competing term and drives $p_t(n)\to1$.
 
 ## Discussion
 
@@ -459,7 +494,34 @@ score multiplier from other transformer components.
 
 The result also sharpens the distinction between finite and asymptotic generalization. A run can clear a fixed length such as $10^7$ while $c\Delta$ still sits below 1, so passing a benchmark certifies only finite-length behavior, not the limit. What survives to unbounded length is a structural property of the learned solution, the growth rate $c\Delta$, and exposing that property cleanly, rather than a single-length benchmark score, is what the reduced model is for.
 
-Two caveats limit how far the learned values themselves should be read. First, how that growth rate is split between $c$ and $\Delta$ is not decided by the training objective: every run trains at a single length, where the loss depends on the two only through the combination $\alpha(10)\Delta=\Delta+c\Delta\log 11$, so many pairs $(c,\Delta)$ fit the training data equally well while implying different limits. The decomposition seen here, with $c$ growing steadily and $\Delta$ nearly flat, therefore reflects the optimizer, the initialization, and the parameterization rather than the objective. Second, the epoch budgets are points on a trajectory rather than converged solutions: the training data are separable and no weight decay is applied, so the loss has no finite minimizer and the parameters keep growing, which is why $c$ and $\Delta$ rise monotonically with the budget.
+The learned values of $c$ and $\Delta$ should not be interpreted as uniquely
+determined by the training objective. Every run is trained only at length 10,
+where attention depends on these parameters through the single combined
+quantity
+
+```math
+\alpha(10)\Delta
+=
+\Delta+(c\Delta)\log 11.
+```
+
+Equivalently, the effective margin is a linear function of $\log(1+n)$ with
+intercept $\Delta$ and slope $c\Delta$, but training at one length observes only
+one point on that line. Many pairs $(c,\Delta)$ can therefore produce the same
+attention and training loss at length 10 while implying different asymptotic
+behavior. In the observed decomposition, $c$ increases steadily while $\Delta$
+changes more slowly. This pattern reflects the optimizer, initialization, and
+parameterization rather than a unique solution required by the training data.
+Training on multiple lengths would constrain the intercept and slope separately.
+
+The epoch budgets should also be interpreted as checkpoints along an ongoing
+optimization trajectory rather than as converged solutions. The training data
+are separable, and without weight decay the binary cross-entropy loss has no
+finite minimizer: even after every training example is classified correctly,
+increasing the magnitude of the logits can continue to reduce the loss. The
+parameters can therefore continue changing as training proceeds. The observed
+increases in $c$ and $\Delta$ are consistent with this continuing optimization,
+but they are not guaranteed to be monotonic by the objective itself.
 
 The reduced model is intentionally limited. It uses fixed semantic value vectors, no positional encodings, one readout query, and a simple binary classifier. These restrictions make the mechanism easy to analyze, but they also mean the conclusion should not be transferred directly to a full transformer, which can have non-identical non-target scores, learned value vectors, multiple heads, residual streams, feed-forward layers, layer normalization, and pooling. Any of these can break the exact two-score structure the analysis relies on.
 
@@ -494,7 +556,11 @@ W_K=
 \end{pmatrix}.
 ```
 
-Because the token embeddings are one-hot, with $t\mapsto[1,0]$ and $u\mapsto[0,1]$, each token's query and key is the corresponding row: the first row gives $q_t$ and $k_t$, the second gives $q_u$ and $k_u$. This recovers the vectors and scores reported in the Mechanism section.
+Because the token embeddings are one-hot, with $t\mapsto[1,0]$ and
+$u\mapsto[0,1]$, the transposes of each token's query and key vectors are the
+corresponding rows of $W_Q$ and $W_K$: the first rows give $q_t^\top$ and
+$k_t^\top$, and the second rows give $q_u^\top$ and $k_u^\top$. This recovers
+the vectors and scores reported in the Mechanism section.
 
 Two details are worth recording. The readout query is always $q_u$, because the last token is always the non-target $u$, so the first row of $W_Q$ is never used by the model; it stays near its initialization at $q_t=(0.364,-0.137)$. The matrices are also not individually identifiable: the model depends on them only through the product $W_QW_K^\top$, whose entries divided by $\sqrt d$ are the scores, so any other pair with the same product defines exactly the same model. The invariant content is the scores, not the individual entries.
 
