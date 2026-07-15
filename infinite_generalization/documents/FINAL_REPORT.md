@@ -83,12 +83,15 @@ s_j=\frac{q_{\mathrm{last}}^\top k_j}{\sqrt d},
 
 Since the token in the last position is $u$, $q_{\mathrm{last}}=q_u$ for every
 example. Writing $k_t$ and $k_u$ for the target and non-target keys, which are
-position-independent, the target and non-target scores are
+position-independent, the target and non-target scores, and the score margin
+between them, are
 
 ```math
 a=\frac{q_u^\top k_t}{\sqrt d},
 \qquad
-b=\frac{q_u^\top k_u}{\sqrt d}.
+b=\frac{q_u^\top k_u}{\sqrt d},
+\qquad
+\Delta=a-b.
 ```
 
 The architecture thus fixes the score vector of a positive example to the two-score structure
@@ -99,12 +102,7 @@ S_n=(a,b,b,\ldots,b),
 
 while training determines only the two values $a$ and $b$. Because there is a
 single non-target type, every non-target position holds the same token, hence
-the same key and the same score $b$ by construction. Define the score 
-margin as
-
-```math
-\Delta=a-b.
-```
+the same key and the same score $b$ by construction.
 
 The central change in this study is an additional score multiplier
 $\alpha(n)$ applied before softmax. The attention weight on position $j$ is
@@ -130,18 +128,14 @@ single target key is
 p_t(n)
 =
 \frac{e^{\alpha(n)a}}
-{e^{\alpha(n)a}+(n-1)e^{\alpha(n)b}}.
-```
-
-Dividing the numerator and denominator by $e^{\alpha(n)b}$ gives the closed
-form
-
-```math
-p_t(n)
+{e^{\alpha(n)a}+(n-1)e^{\alpha(n)b}}
 =
 \frac{e^{\alpha(n)\Delta}}
-{e^{\alpha(n)\Delta}+(n-1)}.
+{e^{\alpha(n)\Delta}+(n-1)},
 ```
+
+where the second form follows by dividing the numerator and denominator by
+$e^{\alpha(n)b}$.
 
 The value pathway reuses these one-hot embeddings directly as value vectors,
 with no learned value projection, so the value vector $v_j$ at position $j$ is
@@ -342,24 +336,21 @@ generated and scored in small chunks, so the full evaluation tensor is never
 materialized.
 
 Each run is labeled by its multiplier mode and epoch budget: for example,
-`constant_e50` is constant scaling trained for 50 epochs and `learned_log_e200`
-is learned-log scaling trained for 200 epochs. We analyze constant runs at 50,
-100, and 1000 epochs; one log run at 50 epochs; and learned-log runs at 50, 100, 200,
-and 400 epochs. These labels index the rows of Table 1, which lists all eight
-runs. The figures below show a representative six: every constant budget (to
-trace the failure point moving outward), the log run, and the two learned-log
-budgets that bracket the $c\Delta=1$ threshold, `learned_log_e50` below and
-`learned_log_e200` above. The omitted `learned_log_e100` and `learned_log_e400`
-sit on the same sides and behave accordingly.
+`constant_e50` is constant scaling trained for 50 epochs. Table 1 lists all
+eight runs: constant at 50, 100, and 1000 epochs; log at 50; and learned-log at
+50, 100, 200, and 400. Figure 1 shows six of them, keeping every constant
+budget and the two learned-log budgets that bracket the $c\Delta=1$ threshold;
+the omitted `learned_log_e100` and `learned_log_e400` fall on the same sides.
 
 ## Results
 
-In this task, length generalization is decided entirely by the positive examples. A negative sequence contains only non-target values, so its attention output is exactly the non-target representation $[0,1]$ by construction, independent of how attention is spread; because the learned threshold satisfies $p^{\ast}>0$ in every run, negatives are classified correctly at every length. The difficulty lives in the positive examples: the target mass $p_t$ can dilute with length until the classifier no longer detects the target. Table 1 reports each run at $10^7$, and Figures 1 and 2 trace the target mass $p_t$ and the positive-example logit across length.
+In this task, length generalization is decided entirely by the positive examples. A negative sequence contains only non-target values, so its attention output is exactly the non-target representation $[0,1]$ by construction, independent of how attention is spread; because the learned threshold satisfies $p^{\ast}>0$ in every run, negatives are classified correctly at every length. The difficulty lives in the positive examples: the target mass $p_t$ can dilute with length until the classifier no longer detects the target. Table 1 reports each run at $10^7$, and Figure 1 traces the target mass $p_t$ in panel (a) and the positive-example logit in panel (b).
 
 **Table 1:** Main results at $n=10^7$, as means over five seeds
-(± one standard deviation). Negative accuracy is 100% in every run.
+(± one standard deviation). The $p_t$, logit, and accuracy columns are measured
+on positive examples; negative accuracy is 100% in every run.
 
-| Run | Steps | $\Delta$ | $c$ | $c\Delta$ | $p_t$ | Positive-example logit | Positive-example accuracy |
+| Run | Steps | $\Delta$ | $c$ | $c\Delta$ | $p_t$ | Logit | Accuracy |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | `constant_e50` | 1600 | 9.0 ± 0.2 | n/a | n/a | 0.001 ± 0.000 | -3.3 ± 0.1 | 0% |
 | `constant_e100` | 3200 | 9.9 ± 0.2 | n/a | n/a | 0.002 ± 0.000 | -4.5 ± 0.1 | 0% |
@@ -372,12 +363,8 @@ In this task, length generalization is decided entirely by the positive examples
 
 
 
-![Target attention by length](./figures/final_report_target_attention_by_length.png)
-**Figure 1:** Target attention mass versus sequence length for six representative runs (mean over five seeds; shaded bands ±1 s.d.). Runs that generalize saturate at $p_t=1$ and coincide here (`log_e50` and `learned_log_e200` overlap, the latter dashed); Figure 2 separates them by positive-example logit.
-
-
-![Positive-example logit by length](./figures/final_report_positive_logit_by_length.png)
-**Figure 2:** Positive-example logit versus sequence length for the same six runs (mean over five seeds; shaded bands ±1 s.d.; the horizontal dashed line at $z=0$ marks the decision boundary).
+![Target attention and positive-example logit by length](./latex/final_report_attention_and_logit_by_length.png)
+**Figure 1:** Target attention mass and positive-example logit versus sequence length for six representative runs (mean over five seeds; shaded bands show ±1 s.d.). (a) Runs that generalize saturate at $p_t=1$, so `log_e50` and `learned_log_e200` overlap, with the latter dashed. (b) The logit curves distinguish these overlapping runs; the horizontal dashed line at $z=0$ marks the decision boundary.
 
 ### Constant Scaling
 
@@ -453,9 +440,9 @@ b\approx-4.237,
 
 ![Learned query/key geometry](./figures/final_report_mechanism_vectors.png)
 
-**Figure 3:** Learned query and key vectors for `learned_log_e200` (seed 1), drawn in the $d=2$ query/key space.
+**Figure 2:** Learned query and key vectors for `learned_log_e200` (seed 1), drawn in the $d=2$ query/key space.
 
-Geometrically (Figure 3), $q_u$ points in a direction that separates the target key from the non-target key. The target key has a positive projection along the readout query direction, while the non-target key has a negative projection. Equivalently, $q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the score pattern $a>b$, the positive score margin $\Delta$ that the length-scaling analysis assumes.
+Geometrically (Figure 2), $q_u$ points in a direction that separates the target key from the non-target key. The target key has a positive projection along the readout query direction, while the non-target key has a negative projection. Equivalently, $q_u$ aligns with the difference vector $k_t-k_u$. This alignment creates the score pattern $a>b$, the positive score margin $\Delta$ that the length-scaling analysis assumes.
 
 The geometry is the same in every seed: across seeds 0-4 the target score $a$ is positive and the non-target score $b$ negative, $q_u$ is nearly collinear with $k_t-k_u$ (cosine $\geq0.99$), and $\Delta=9.03\pm0.28$.
 
