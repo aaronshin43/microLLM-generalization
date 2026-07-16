@@ -2,7 +2,7 @@
 
 ## Abstract
 
-Softmax-attention classifiers trained on short sequences can fail at much longer lengths, even on a single-target detection task, because the target shares a fixed attention budget with a growing crowd of non-targets. We ask when length-aware attention overcomes this dilution in an exactly analyzable reduced binary classifier, where one readout query attends to one-hot token embeddings and identical non-targets yield a closed form for target attention. We compare constant, logarithmic, and learned logarithmic scaling. As sequences grow, the target eventually receives essentially all attention only when its unnormalized weight outgrows the non-targets' aggregate weight. Constant scaling never reaches this limit; logarithmic scaling does when the learned target score advantage is large enough; learned logarithmic scaling does when training makes amplification grow fast enough. Below the growth threshold, positive classification eventually fails; at equality, correctness depends on the learned decision threshold. A model may pass at ten million tokens yet be predicted to fail later: finite-length accuracy alone cannot establish unbounded-length behavior.
+Softmax-attention classifiers trained on short sequences can fail at much longer lengths, even on a single-target detection task, because the target shares a fixed attention budget with a growing crowd of non-targets. We ask when length-aware attention overcomes this dilution in an exactly analyzable reduced binary classifier, where one readout query attends to one-hot token embeddings and identical non-targets yield a closed form for target attention. We compare three attention-score scaling rules: constant, logarithmic, and learned logarithmic. As sequences grow, the target eventually receives essentially all attention only when its unnormalized weight outgrows the non-targets' aggregate weight. Constant scaling never reaches this limit; logarithmic scaling does when the learned target score advantage is large enough; learned logarithmic scaling does when training makes amplification grow fast enough. Below the growth threshold, positive classification eventually fails; at equality, correctness depends on the learned decision threshold. A model may pass at ten million tokens yet be predicted to fail later: finite-length accuracy alone cannot establish unbounded-length behavior.
 
 ## Introduction
 
@@ -311,13 +311,13 @@ $\alpha(n)$ across three modes:
 
 ```math
 \begin{aligned}
-\texttt{constant}:     && \alpha(n) &= 1,\\
-\texttt{log}:          && \alpha(n) &= \log n,\\
-\texttt{learned\_log}: && \alpha(n) &= 1+c\log(1+n).
+\text{Constant}:    && \alpha(n) &= 1,\\
+\text{Log}:         && \alpha(n) &= \log n,\\
+\text{Learned log}: && \alpha(n) &= 1+c\log(1+n).
 \end{aligned}
 ```
 
-For `learned_log`, the coefficient is $c=\mathrm{softplus}(k_\alpha)$, where
+For learned-log scaling, the coefficient is $c=\mathrm{softplus}(k_\alpha)$, where
 $k_\alpha$ is an unconstrained learnable scalar, so $c$ stays positive during
 optimization.
 
@@ -339,7 +339,7 @@ and report continuous quantities as means and standard deviations.
 After setting each run seed, all linear weights are initialized independently
 from $\mathcal U(-1/\sqrt{2},1/\sqrt{2})$; the classifier bias uses the same
 distribution, while the query and key projections have no bias. In
-`learned_log`, $k_\alpha$ is initialized to $-5$, so
+learned-log runs, $k_\alpha$ is initialized to $-5$, so
 $c=\mathrm{softplus}(-5)\approx0.0067$.
 
 Each trained model is evaluated on 50 balanced examples at every power of ten
@@ -347,12 +347,12 @@ from $10$ to $10^7$, six orders of magnitude beyond the training length.
 Length-$10^7$ sequences are generated and scored in small chunks so that the
 full evaluation tensor is never materialized.
 
-Each run is labeled by its multiplier mode and epoch budget: for example,
-`constant_e50` is constant scaling trained for 50 epochs. Table 1 lists all
+We label each configuration by its scaling rule and epoch budget: for example,
+Constant (50) denotes constant scaling trained for 50 epochs. Table 1 lists all
 eight runs: constant at 50, 100, and 1000 epochs; log at 50; and learned-log at
 50, 100, 200, and 400, doubling the budget at each step. Figure 1 shows six of them, keeping every constant
 budget and the two learned-log budgets that bracket the $c\Delta=1$ threshold;
-the omitted `learned_log_e100` and `learned_log_e400` fall on the same sides.
+the omitted Learned log (100) and Learned log (400) configurations fall on the same sides.
 
 ## Results
 
@@ -366,23 +366,23 @@ negative accuracy is 100% in every run.
 
 | Run | Steps | $\Delta$ | $c$ | $c\Delta$ | $p_t$ | Logit | Accuracy |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `constant_e50` | 1600 | 9.0 ± 0.2 | n/a | n/a | 0.001 ± 0.000 | -3.3 ± 0.1 | 0% |
-| `constant_e100` | 3200 | 9.9 ± 0.2 | n/a | n/a | 0.002 ± 0.000 | -4.5 ± 0.1 | 0% |
-| `constant_e1000` | 32000 | 13.2 ± 0.2 | n/a | n/a | 0.050 ± 0.010 | -17.3 ± 0.4 | 0% |
-| `log_e50` | 1600 | 4.4 ± 0.1 | n/a | n/a | 1.000 ± 0.000 | 3.2 ± 0.1 | 100% |
-| `learned_log_e50` | 1600 | 8.1 ± 0.2 | 0.072 ± 0.006 | 0.58 ± 0.03 | 0.788 ± 0.075 | 1.9 ± 0.5 | 100% |
-| `learned_log_e100` | 3200 | 8.6 ± 0.3 | 0.096 ± 0.008 | 0.83 ± 0.05 | 0.997 ± 0.002 | 4.6 ± 0.1 | 100% |
-| `learned_log_e200` | 6400 | 9.0 ± 0.3 | 0.126 ± 0.010 | 1.14 ± 0.06 | 1.000 ± 0.000 | 6.4 ± 0.1 | 100% |
-| `learned_log_e400` | 12800 | 9.4 ± 0.3 | 0.166 ± 0.013 | 1.55 ± 0.08 | 1.000 ± 0.000 | 9.6 ± 0.1 | 100% |
+| Constant (50) | 1600 | 9.0 ± 0.2 | n/a | n/a | 0.001 ± 0.000 | -3.3 ± 0.1 | 0% |
+| Constant (100) | 3200 | 9.9 ± 0.2 | n/a | n/a | 0.002 ± 0.000 | -4.5 ± 0.1 | 0% |
+| Constant (1000) | 32000 | 13.2 ± 0.2 | n/a | n/a | 0.050 ± 0.010 | -17.3 ± 0.4 | 0% |
+| Log (50) | 1600 | 4.4 ± 0.1 | n/a | n/a | 1.000 ± 0.000 | 3.2 ± 0.1 | 100% |
+| Learned log (50) | 1600 | 8.1 ± 0.2 | 0.072 ± 0.006 | 0.58 ± 0.03 | 0.788 ± 0.075 | 1.9 ± 0.5 | 100% |
+| Learned log (100) | 3200 | 8.6 ± 0.3 | 0.096 ± 0.008 | 0.83 ± 0.05 | 0.997 ± 0.002 | 4.6 ± 0.1 | 100% |
+| Learned log (200) | 6400 | 9.0 ± 0.3 | 0.126 ± 0.010 | 1.14 ± 0.06 | 1.000 ± 0.000 | 6.4 ± 0.1 | 100% |
+| Learned log (400) | 12800 | 9.4 ± 0.3 | 0.166 ± 0.013 | 1.55 ± 0.08 | 1.000 ± 0.000 | 9.6 ± 0.1 | 100% |
 
 
 
 ![Target attention and positive-example logit by length](./latex/final_report_attention_and_logit_by_length.png)
-**Figure 1:** Target attention mass and positive-example logit versus sequence length for six representative runs (mean over five seeds; shaded bands show ±1 s.d.). (a) Runs for which $p_t(n)\to1$ saturate near $p_t=1$, so `log_e50` and `learned_log_e200` overlap, with the latter dashed. (b) The logit curves distinguish these overlapping runs; the horizontal dashed line at $z=0$ marks the decision boundary.
+**Figure 1:** Target attention mass and positive-example logit versus sequence length for six representative runs (mean over five seeds; shaded bands show ±1 s.d.). (a) Runs for which $p_t(n)\to1$ saturate near $p_t=1$, so Log (50) and Learned log (200) overlap, with the latter dashed. (b) The logit curves distinguish these overlapping runs; the horizontal dashed line at $z=0$ marks the decision boundary.
 
 ### Constant Scaling
 
-Constant scaling uses $\alpha=1$. At any fixed $\Delta$ this gives $p_t(n)\to0$. Empirically, more training increases $\Delta$, moving the failure point outward without changing this asymptotic regime: the positive-example accuracy at $10^7$ is 0% for all three budgets in every seed. More training even drives the positive-example logit more negative, not less (Table 1: $-3.3$, $-4.5$, $-17.3$ for e50, e100, e1000): once the target mass has collapsed, the logit is set by the learned intercept $w_u+\beta$, which itself grows more negative with training. The larger margin only postpones the collapse; the theory still predicts failure for any finite fixed margin.
+Constant scaling uses $\alpha=1$. At any fixed $\Delta$ this gives $p_t(n)\to0$. Empirically, more training increases $\Delta$, moving the failure point outward without changing this asymptotic regime: the positive-example accuracy at $10^7$ is 0% for all three budgets in every seed. More training even drives the positive-example logit more negative, not less (Table 1: $-3.3$, $-4.5$, and $-17.3$ at 50, 100, and 1000 epochs, respectively): once the target mass has collapsed, the logit is set by the learned intercept $w_u+\beta$, which itself grows more negative with training. The larger margin only postpones the collapse; the theory still predicts failure for any finite fixed margin.
 
 ### Log Scaling
 
@@ -396,7 +396,7 @@ Only at 200 epochs does $c\Delta$ exceed 1 in every seed ($1.14\pm0.06$, smalles
 
 The crossing is driven by the coefficient $c$, which grows monotonically with the training budget ($0.072\to0.096\to0.126\to0.166$) while the score margin $\Delta$ grows only modestly ($8.1\to8.6\to9.0\to9.4$).
 
-The e50 and e100 budgets reach 100% at $10^7$ with $c\Delta<1$: passing at one length does not certify generalization to every length. The property that transfers is the growth rate $c\Delta$, not accuracy at any single point. Table 1 shows this directly: `constant_e50` and `learned_log_e200` learn the same score margin ($\Delta=9.0$), yet the first collapses ($p_t=0.001$, 0%) and the second saturates ($p_t=1.000$, 100%). The difference comes from the length scaling, not from $\Delta$.
+The 50- and 100-epoch learned-log runs reach 100% at $10^7$ with $c\Delta<1$: passing at one length does not certify generalization to every length. The property that transfers is the growth rate $c\Delta$, not accuracy at any single point. Table 1 shows this directly: the 50-epoch constant and 200-epoch learned-log runs learn the same score margin ($\Delta=9.0$), yet the first collapses ($p_t=0.001$, 0%) and the second saturates ($p_t=1.000$, 100%). The difference comes from the length scaling, not from $\Delta$.
 
 ## Mechanism: The Learned Score Separation
 
@@ -411,7 +411,7 @@ a-b
 \frac{q_u^\top(k_t-k_u)}{\sqrt d}.
 ```
 
-For one `learned_log_e200` checkpoint (seed 1), the learned vectors are approximately
+For one 200-epoch learned-log checkpoint (seed 1), the learned vectors are approximately
 
 ```math
 q_u=
@@ -445,7 +445,7 @@ b\approx-4.237,
 
 ![Learned query/key geometry](./figures/final_report_mechanism_vectors.png)
 
-**Figure 2:** Learned query and key vectors for `learned_log_e200` (seed 1), drawn in the $d=2$ query/key space.
+**Figure 2:** Learned query and key vectors for the 200-epoch learned-log run (seed 1), drawn in the $d=2$ query/key space.
 
 Figure 2 visualizes one parameterization of the learned solution.
 
@@ -469,7 +469,7 @@ differ. Figure 2 therefore shows one learned representation of the score
 separation, not a geometry required by the task.
 
 The invariant mechanism is therefore the score separation itself. For
-`learned_log_e200` across seeds 0-4, the target score is positive, the
+the 200-epoch learned-log run across seeds 0-4, the target score is positive, the
 non-target score is negative, and $\Delta=9.03\pm0.28$. The cosine similarity
 between $q_u$ and $k_t-k_u$ is also at least 0.99 in every seed,
 showing that this training setup consistently reaches a similarly aligned
@@ -508,7 +508,7 @@ This report studied length generalization in a reduced binary attention classifi
 
 ### Learned Query and Key Matrices for the Mechanism Example
 
-The Mechanism section reports the query and key vectors of `learned_log_e200` (seed 1). They come from the two learned projection matrices, which for that run are
+The Mechanism section reports the query and key vectors of the 200-epoch learned-log run (seed 1). They come from the two learned projection matrices, which for that run are
 
 ```math
 W_Q=
@@ -560,18 +560,18 @@ Table 2 evaluates this per seed for the two budgets with $c\Delta<1$, using each
 
 | Run | Seed | $\Delta$ | $c$ | $c\Delta$ | $p^{\ast}$ | $n^{\ast}$ |
 |---|---:|---:|---:|---:|---:|---:|
-| `learned_log_e50` | 0 | 8.33 | 0.069 | 0.572 | 0.497 | $10^{8.5}$ |
+| Learned log (50) | 0 | 8.33 | 0.069 | 0.572 | 0.497 | $10^{8.5}$ |
 | | 1 | 8.06 | 0.072 | 0.578 | 0.498 | $10^{8.3}$ |
 | | 2 | 7.72 | 0.079 | 0.611 | 0.496 | $10^{8.6}$ |
 | | 3 | 8.24 | 0.065 | 0.533 | 0.495 | $10^{7.7}$ |
 | | 4 | 8.13 | 0.076 | 0.616 | 0.494 | $10^{9.2}$ |
-| `learned_log_e100` | 0 | 8.89 | 0.090 | 0.804 | 0.499 | $10^{19.7}$ |
+| Learned log (100) | 0 | 8.89 | 0.090 | 0.804 | 0.499 | $10^{19.7}$ |
 | | 1 | 8.60 | 0.093 | 0.802 | 0.499 | $10^{18.9}$ |
 | | 2 | 8.22 | 0.106 | 0.869 | 0.498 | $10^{27.3}$ |
 | | 3 | 8.79 | 0.089 | 0.785 | 0.497 | $10^{17.8}$ |
 | | 4 | 8.65 | 0.103 | 0.891 | 0.496 | $10^{34.4}$ |
 
-The two budgets that cross the threshold have no finite failure length, since $c\Delta>1$ drives $p_t(n)\to1$. Their per-seed values are $c\Delta=1.088$, $1.078$, $1.186$, $1.105$, and $1.220$ for `learned_log_e200`, and $1.483$, $1.463$, $1.614$, $1.548$, and $1.660$ for `learned_log_e400`, so both clear the threshold in every seed.
+The two budgets that cross the threshold have no finite failure length, since $c\Delta>1$ drives $p_t(n)\to1$. Their per-seed values are $c\Delta=1.088$, $1.078$, $1.186$, $1.105$, and $1.220$ at 200 epochs, and $1.483$, $1.463$, $1.614$, $1.548$, and $1.660$ at 400 epochs, so both learned-log budgets clear the threshold in every seed.
 
 ## Use of Artificial Intelligence
 
