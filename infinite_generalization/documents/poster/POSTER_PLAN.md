@@ -265,18 +265,25 @@ to preserve the target's share of attention as sequence length increases.
 The former prose sentence ("The target retains an advantage over every
 individual non-target, but the non-targets grow in number and dominate in
 aggregate") is delivered visually. Each scene stacks three layers: a per-token
-attention-weight bar chart (one tall target bar marked $a$, short identical
-non-target bars marked $b$), the token row, and a target-share bar. The weight
-bars are identical across the two scenes while the share bar's target segment
-shrinks, so the unchanged individual advantage and the aggregate loss are both
-visible. The only remaining prose claim is the equation-takeaway box.
+attention bar chart, the token row, and a target-share bar. In the long scene,
+every normalized per-token bar is shorter because the fixed attention budget is
+split across more tokens, while the target remains taller than any individual
+non-target. The growing collection of small non-target bars and the shrinking
+target segment in the share bar show the aggregate loss. The long token row
+uses an ellipsis but keeps the final non-target visible because the query comes
+from that last position. The short scene uses the actual training length
+$n=10$ and an illustrative target share of about 60%; the long scene uses the
+same target-to-non-target ratio and a target share of about 22%. The only
+remaining prose claim is the equation-takeaway box. All per-token bars use one
+qualitative display scale rather than encoding exact numeric proportions. The
+non-target bars are deliberately enlarged and use a darker neutral fill so that
+their small weights remain visible in print.
 
 #### Visual Labels
 
-- Short sequence / Long sequence
-- attention weight per token (same in both scenes), with $a$ and $b$ marks on
-  the short-scene bars
-- combined weight grows (brace over the long scene's non-target weight bars)
+- Short sequence ($n=10$) / Long sequence
+- attention per token
+- many small weights add up (brace over the long scene's non-target bars)
 - target's share of attention / all non-targets combined (on the share bars)
 - (schematic)
 
@@ -290,7 +297,7 @@ display
 ```math
 p_t(n)
 =
-\frac{1}{1+(n-1)\,e^{-\Delta}}
+\frac{e^\Delta}{e^\Delta+(n-1)}
 \;\longrightarrow\;
 0
 \quad\text{as } n\to\infty,
@@ -298,9 +305,11 @@ p_t(n)
 \Delta=a-b>0.
 ```
 
-The intermediate $\exp(a)/(\exp(a)+(n-1)\exp(b))$ form and the prose
-conclusion are omitted; the limit is folded into the display and the words are
-carried by the equation-takeaway box.
+The equivalent reciprocal form $1/[1+(n-1)e^{-\Delta}]$ and the prose
+conclusion are omitted. The numerator-and-denominator form maps the single
+target weight and the growing non-target crowd directly onto the schematic;
+the limit is folded into the display and the words are carried by the
+equation-takeaway box.
 
 Equation takeaway:
 
@@ -316,12 +325,13 @@ attention rule.
 - Use a horizontal short-sequence versus long-sequence comparison.
 - Represent the target with one accent color and the non-targets in neutral
   gray.
-- Keep the target's individual advantage unchanged in both scenes; only the
-  number and aggregate weight of the non-targets should increase.
+- Keep the target-to-non-target per-token attention ratio unchanged in both
+  scenes, while shrinking all individual normalized weights in the long scene.
+  Only the number and combined attention of the non-targets should increase.
 - Visually distinguish an individual non-target from the combined non-target
   weight, for example with a bracket or a grouped background shape.
-- Link the visual to the equation by using the non-target color for the
-  $(n-1)$ term and the target accent color for the score-margin annotation.
+- Keep score notation in the formal statement rather than labeling the
+  normalized attention bars with $a$ and $b$.
 - Place the formal statement in a visually separate box so that the intuitive
   reading path does not require the equation.
 - If illustrative numerical weights are used, label them as schematic rather
@@ -338,8 +348,9 @@ it, and the Section 2 heading answers it.
 
 - Copy: reduced to the task sentence plus the two boxed statements
 - Formal statement: single-form display with the limit folded in
-- Visual: refined draft; each scene stacks weight bars over a baseline, the
-  token row, and a share bar, with a navy target throughout
+- Visual: refined draft; each scene stacks normalized per-token attention bars,
+  the token row, and a share bar, with an ellipsis in the long sequence and a
+  navy target throughout
 
 ## Reduced Model Schematic
 
@@ -397,9 +408,9 @@ o(n)=\big(p_t(n),\,1-p_t(n)\big)
 ### Poster Labels
 
 1. **Token sequence**
-2. **Final query scores all tokens**
+2. **Last-position query scores all tokens**
 3. **Length-scaled softmax**
-4. **Attention-weighted sum**
+4. **Attention-weighted sum** *(one-hot values)*
 5. **Linear classifier**
 
 The final output labels are **Target absent** and **Target present**.
@@ -409,8 +420,9 @@ The final output labels are **Target absent** and **Target present**.
 > A single final-position query attends over one-hot token embeddings; the
 > embeddings are reused as values, with no learned value projection.
 
-This note is omitted on the poster to reduce text; it remains in the full
-report.
+The schematic now identifies the last-position query and the one-hot values
+directly. The remaining implementation detail---that there is no learned value
+projection---is omitted on the poster and remains in the full report.
 
 The phrase **attention-weighted sum** should be used instead of **pooled
 output**. Although the model reduces a variable-length sequence to a fixed-size
@@ -428,6 +440,9 @@ vector, it has no separate mean, max, or learned pooling layer.
 - Highlight the length-scaled softmax stage with a heavier navy outline; the
   technical note is omitted on the poster.
 - Keep arrows and labels visually dominant; arrows use the structural navy.
+- Enlarge the schematic slightly within the center card and increase the
+  in-node type so that the five-stage pathway remains legible at poster-viewing
+  distance.
 - Do not add a separate pooling operation, value projection, multi-head block,
   residual connection, or other full-transformer components.
 - A negative-example path is not necessary; the task definition already states
@@ -435,9 +450,11 @@ vector, it has no separate mean, max, or learned pooling layer.
 
 ### Status
 
-- Content: first complete draft; technical note omitted on the poster
+- Content: first complete draft; the last-position query and one-hot values are
+  labeled directly, while the no-value-projection detail is omitted
 - Terminology: attention-weighted sum confirmed
-- Visual: refined draft with navy arrows and a navy-outlined softmax stage
+- Visual: refined draft with enlarged nodes and type, navy arrows, and a
+  navy-outlined softmax stage
 
 ## Section 2: How Length-Aware Scaling Counters Dilution
 
@@ -535,6 +552,9 @@ Optional technical note:
   across the middle two columns.
 - Give each mode one formula, one plain-language description, and one
   long-length outcome.
+- Fix each mode title to the top of its card, then vertically center the
+  formula--description--outcome group in a separate fixed-height region below
+  it.
 - Use the same mode colors that will appear in the Section 3 result figure.
 - Keep the asymptotic criterion visually optional: it should be easy for a
   general reader to skip but large enough for a technical reader to inspect.
@@ -552,7 +572,8 @@ Optional technical note:
 
 - Copy: first complete draft
 - Formal criterion: complete
-- Visual: refined full-layout draft complete
+- Visual: refined full-layout draft complete; mode titles share a fixed top
+  baseline and each explanatory group is vertically centered below its title
 
 ## Section 3: Results
 
@@ -631,6 +652,7 @@ The callout is rendered inside the plot's empty central region as a navy
 annotation with two thin arrows to the diverging curve groups:
 
 > **Same margin, opposite outcomes**  
+> Constant (50) vs Learned log (200)
 > both learn $\Delta\approx9$  
 > positive accuracy at $n=10^7$: 0% vs 100%
 

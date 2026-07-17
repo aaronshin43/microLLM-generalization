@@ -182,39 +182,38 @@ The model detects whether a designated target token is present in the sequence.
   rowlabel/.style={font=\bfseries\fontsize{23}{27}\selectfont,text=Navy,anchor=west},
   note/.style={font=\fontsize{19}{23}\selectfont,text=Muted},
   barlabel/.style={font=\bfseries\fontsize{16}{19}\selectfont},
-  scorelabel/.style={font=\fontsize{20}{22}\selectfont}
+  ellipsis/.style={font=\bfseries\fontsize{27}{30}\selectfont,text=Muted}
 ]
-  % Short scene: per-token weight bars over a baseline, token row, share bar.
-  \node[rowlabel] at (0,10.72) {Short sequence};
-  \fill[Navy] (0.21,9.00) rectangle (0.51,10.35);
-  \node[scorelabel,text=white] at (0.36,10.08) {$a$};
-  \foreach \i in {1,2,3} {
-    \fill[Border] (0.36+\i*0.80-0.15,9.00) rectangle (0.36+\i*0.80+0.15,9.55);
-  }
-  \node[scorelabel,text=Muted] at (1.16,9.27) {$b$};
-  \draw[Muted,line width=1.1pt] (0,9.00) -- (3.30,9.00);
-  \node[note,anchor=west,align=left] at (3.55,9.72)
-    {attention weight per token\\(same in both scenes)};
-  \node[target] at (0.36,8.42) {T};
-  \foreach \i in {1,2,3} {\node[non] at (0.36+\i*0.80,8.42) {N};}
-  \fill[Navy] (0,7.18) rectangle (3.56,7.78);
-  \fill[SoftGray] (3.56,7.18) rectangle (7.92,7.78);
-  \draw[Border,line width=1pt] (0,7.18) rectangle (7.92,7.78);
-  \node[barlabel,text=white] at (1.78,7.48) {target's share of attention};
-  \node[barlabel,text=Muted] at (5.74,7.48) {all non-targets combined};
-
-  % Long scene: same weights, more competitors, shrunken target share.
-  \node[rowlabel] at (0,6.42) {Long sequence};
-  \fill[Navy] (0.21,4.35) rectangle (0.51,5.70);
+  % Short scene: normalized per-token attention, token row, and total share.
+  \node[rowlabel] at (0,11.48) {Short sequence ($n=10$)};
+  \fill[Navy] (0.21,9.00) rectangle (0.51,11.16);
   \foreach \i in {1,...,9} {
-    \fill[Border] (0.36+\i*0.80-0.15,4.35) rectangle (0.36+\i*0.80+0.15,4.90);
+    \fill[Muted!45] (0.36+\i*0.80-0.15,9.00) rectangle (0.36+\i*0.80+0.15,9.24);
   }
+  \draw[Muted,line width=1.1pt] (0,9.00) -- (7.92,9.00);
+  \node[note,anchor=east] at (7.92,11.48) {attention per token};
+  \node[target] at (0.36,8.42) {T};
+  \foreach \i in {1,...,9} {\node[non] at (0.36+\i*0.80,8.42) {N};}
+  \fill[Navy] (0,7.18) rectangle (4.75,7.78);
+  \fill[SoftGray] (4.75,7.18) rectangle (7.92,7.78);
+  \draw[Border,line width=1pt] (0,7.18) rectangle (7.92,7.78);
+  \node[barlabel,text=white] at (2.375,7.48) {target's share of attention};
+  \node[barlabel,text=Muted] at (6.335,7.48) {all non-targets combined};
+
+  % Long scene: smaller normalized weights, more competitors, less target share.
+  \node[rowlabel] at (0,6.42) {Long sequence};
+  \fill[Navy] (0.21,4.35) rectangle (0.51,5.13);
+  \foreach \i in {1,...,5,9} {
+    \fill[Muted!45] (0.36+\i*0.80-0.15,4.35) rectangle (0.36+\i*0.80+0.15,4.47);
+  }
+  \node[ellipsis] at (5.96,4.50) {$\cdots$};
   \draw[Muted,line width=1.1pt] (0,4.35) -- (7.92,4.35);
   \draw[decorate,decoration={brace,amplitude=8pt},Muted,line width=1.6pt]
     (1.01,5.12) -- (7.71,5.12)
-    node[midway,above=0.15in,note] {combined weight grows};
+    node[midway,above=0.15in,note] {many small weights add up};
   \node[target] at (0.36,3.77) {T};
-  \foreach \i in {1,...,9} {\node[non] at (0.36+\i*0.80,3.77) {N};}
+  \foreach \i in {1,...,5,9} {\node[non] at (0.36+\i*0.80,3.77) {N};}
+  \node[ellipsis] at (5.96,3.77) {$\cdots$};
   \fill[Navy] (0,2.53) rectangle (1.70,3.13);
   \fill[SoftGray] (1.70,2.53) rectangle (7.92,3.13);
   \draw[Border,line width=1pt] (0,2.53) rectangle (7.92,3.13);
@@ -237,7 +236,7 @@ Let $p_t(n)$ be the target's share of attention. With target score $a$ and
 $n-1$ identical non-target scores $b$, standard softmax attention \textbf{[1]}
 gives
 \[
-  p_t(n)=\frac{1}{1+(n-1)\,e^{-\Delta}}
+  p_t(n)=\frac{e^{\Delta}}{e^{\Delta}+(n-1)}
   \;\longrightarrow\;0
   \quad\text{as } n\to\infty,
   \qquad \Delta=a-b>0.
@@ -256,14 +255,14 @@ gives
 \begin{center}
 \begin{tikzpicture}[
   >=Latex,
-  stage/.style={draw=Border,fill=SoftGray,rounded corners=7pt,line width=1.2pt,minimum height=1.14in,align=center,font=\bfseries\fontsize{18}{22}\selectfont,text=Navy},
+  stage/.style={draw=Border,fill=SoftGray,rounded corners=7pt,line width=1.2pt,minimum height=1.28in,align=center,font=\bfseries\fontsize{20}{24}\selectfont,text=Navy},
   arrow/.style={->,line width=2.2pt,draw=Navy}
 ]
-  \node[stage,text width=2.55in] (tokens) {Token sequence\\[2pt]{\textcolor{Navy}{\bfseries T}\;\;\textcolor{Muted}{N\;\;N\;\;$\cdots$}}};
-  \node[stage,text width=2.85in,right=0.26in of tokens] (scores) {Final query scores all tokens\\[3pt]$S_n=(a,b,b,\ldots,b)$};
-  \node[stage,text width=3.10in,right=0.26in of scores,fill=white,draw=Navy,line width=2.4pt] (softmax) {Length-scaled softmax\\[3pt]$\operatorname{softmax}\!\big(\alpha(n)S_n\big)$};
-  \node[stage,text width=3.15in,right=0.26in of softmax] (sum) {Attention-weighted sum\\[3pt]$o(n)=\big(p_t(n),1-p_t(n)\big)$};
-  \node[stage,text width=2.65in,right=0.26in of sum] (head) {Linear classifier\\[3pt]Target absent / present};
+  \node[stage,text width=2.75in] (tokens) {Token sequence\\[2pt]{\textcolor{Navy}{\bfseries T}\;\;\textcolor{Muted}{N\;\;N\;\;$\cdots$}}};
+  \node[stage,text width=3.15in,right=0.27in of tokens] (scores) {Last-position query scores all tokens\\[3pt]$S_n=(a,b,b,\ldots,b)$};
+  \node[stage,text width=3.35in,right=0.27in of scores,fill=white,draw=Navy,line width=2.4pt] (softmax) {Length-scaled softmax\\[3pt]$\operatorname{softmax}\!\big(\alpha(n)S_n\big)$};
+  \node[stage,text width=3.45in,right=0.27in of softmax] (sum) {Attention-weighted sum\\[-1pt]{\normalfont\fontsize{18}{21}\selectfont(one-hot values)}\\[3pt]$o(n)=\big(p_t(n),1-p_t(n)\big)$};
+  \node[stage,text width=2.85in,right=0.27in of sum] (head) {Linear classifier\\[3pt]Target absent / present};
   \draw[arrow] (tokens) -- (scores);
   \draw[arrow] (scores) -- (softmax);
   \draw[arrow] (softmax) -- (sum);
@@ -279,39 +278,42 @@ $\alpha(n)\Delta$.
 \vfill
 \noindent
 \begin{minipage}[t]{0.315\linewidth}
-\begin{tcolorbox}[height=2.75in,colback=SoftGray,colframe=Charcoal,boxrule=1.5pt,arc=7pt,left=0.16in,right=0.16in,top=0.13in,bottom=0.10in]
+\begin{tcolorbox}[height=2.75in,valign=top,colback=SoftGray,colframe=Charcoal,boxrule=1.5pt,arc=7pt,left=0.16in,right=0.16in,top=0.13in,bottom=0.10in]
 \centering\ModeFont
 {\bfseries\fontsize{28}{32}\selectfont Constant}\par
 \vspace{0.06in}
+\parbox[c][1.92in][c]{\linewidth}{\centering\ModeFont
 {\fontsize{27}{32}\selectfont $\alpha(n)=1$}\par
-\vspace{0.08in}
+\vspace{0.10in}
 No response to sequence length\par
-\vfill
-{\bfseries\fontsize{25}{30}\selectfont $p_t(n)\to0$}
+\vspace{0.12in}
+{\bfseries\fontsize{25}{30}\selectfont $p_t(n)\to0$}}
 \end{tcolorbox}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.315\linewidth}
-\begin{tcolorbox}[height=2.75in,colback=SoftBlue,colframe=Blue,boxrule=1.5pt,arc=7pt,left=0.16in,right=0.16in,top=0.13in,bottom=0.10in]
+\begin{tcolorbox}[height=2.75in,valign=top,colback=SoftBlue,colframe=Blue,boxrule=1.5pt,arc=7pt,left=0.16in,right=0.16in,top=0.13in,bottom=0.10in]
 \centering\ModeFont
 {\bfseries\fontsize{28}{32}\selectfont Log}\par
 \vspace{0.06in}
+\parbox[c][1.92in][c]{\linewidth}{\centering\ModeFont
 {\fontsize{27}{32}\selectfont $\alpha(n)=\log n$}\par
-\vspace{0.08in}
+\vspace{0.10in}
 Preset logarithmic growth\par
-\vfill
-{\bfseries\fontsize{25}{30}\selectfont $p_t(n)\to1$ if $\Delta>1$}
+\vspace{0.12in}
+{\bfseries\fontsize{25}{30}\selectfont $p_t(n)\to1$ if $\Delta>1$}}
 \end{tcolorbox}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.315\linewidth}
-\begin{tcolorbox}[height=2.75in,colback=SoftRose,colframe=Rose,boxrule=1.5pt,arc=7pt,left=0.16in,right=0.16in,top=0.13in,bottom=0.10in]
+\begin{tcolorbox}[height=2.75in,valign=top,colback=SoftRose,colframe=Rose,boxrule=1.5pt,arc=7pt,left=0.16in,right=0.16in,top=0.13in,bottom=0.10in]
 \centering\ModeFont
 {\bfseries\fontsize{28}{32}\selectfont Learned log}\par
 \vspace{0.06in}
+\parbox[c][1.92in][c]{\linewidth}{\centering\ModeFont
 {\fontsize{27}{32}\selectfont $\alpha(n)=1+c\log(1+n)$}\par
-\vspace{0.08in}
+\vspace{0.10in}
 Optimization learns $c>0$\par
-\vfill
-{\bfseries\fontsize{25}{30}\selectfont $p_t(n)\to1$ if $c\Delta>1$}
+\vspace{0.12in}
+{\bfseries\fontsize{25}{30}\selectfont $p_t(n)\to1$ if $c\Delta>1$}}
 \end{tcolorbox}
 \end{minipage}
 

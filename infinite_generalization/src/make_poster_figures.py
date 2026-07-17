@@ -255,8 +255,10 @@ def plot_target_attention(output_dir: Path) -> None:
     )
     ax.text(
         5.0e5,
-        0.44,
-        "both learn $\\Delta\\approx9$\npositive accuracy at $n=10^7$: 0% vs 100%",
+        0.455,
+        "Constant (50) vs Learned log (200)\n"
+        "both learn $\\Delta\\approx9$\n"
+        "positive accuracy at $n=10^7$: 0% vs 100%",
         fontsize=13.2,
         color=TEXT,
         ha="center",
