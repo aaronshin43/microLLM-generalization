@@ -1,0 +1,415 @@
+\documentclass[12pt]{article}
+
+\usepackage[paperwidth=40in,paperheight=30in,margin=0.55in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,decorations.pathreplacing,positioning}
+\usepackage{tcolorbox}
+\usepackage{ragged2e}
+\usepackage{microtype}
+\usepackage{array}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+
+\definecolor{PosterBg}{HTML}{F4F6F8}
+\definecolor{Navy}{HTML}{19324D}
+\definecolor{Text}{HTML}{202124}
+\definecolor{Muted}{HTML}{5F6368}
+\definecolor{Border}{HTML}{D7DDE4}
+\definecolor{SoftBlue}{HTML}{EAF3F8}
+\definecolor{Blue}{HTML}{0072B2}
+\definecolor{SoftRose}{HTML}{F7EDF2}
+\definecolor{Rose}{HTML}{A64D79}
+\definecolor{SoftAmber}{HTML}{FBF3E8}
+\definecolor{Amber}{HTML}{C47A35}
+\definecolor{Charcoal}{HTML}{4D4D4D}
+\definecolor{SoftGray}{HTML}{EEF1F4}
+
+\pagecolor{PosterBg}
+\color{Text}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.13in}
+\setlength{\fboxsep}{0pt}
+\hyphenpenalty=10000
+\exhyphenpenalty=10000
+
+\newcommand{\BodyFont}{\fontsize{26}{31}\selectfont}
+\newcommand{\SmallFont}{\fontsize{21}{25}\selectfont}
+\newcommand{\TinyFont}{\fontsize{19}{23}\selectfont}
+\newcommand{\ModeFont}{\fontsize{22}{26}\selectfont}
+\newcommand{\QuestionFont}{\fontsize{32}{38}\selectfont}
+
+\newtcolorbox{contentcard}[1][]{
+  colback=white,
+  colframe=Border,
+  boxrule=1.2pt,
+  arc=10pt,
+  outer arc=10pt,
+  left=0.30in,
+  right=0.30in,
+  top=0.26in,
+  bottom=0.26in,
+  before skip=0pt,
+  after skip=0pt,
+  before upper={\BodyFont\RaggedRight},
+  #1
+}
+
+\newcommand{\sectionheading}[1]{%
+  {\RaggedRight\color{Navy}\bfseries\fontsize{34}{39}\selectfont #1\par}%
+  \vspace{0.05in}%
+  {\color{Blue}\rule{0.78in}{3pt}}\par
+  \vspace{0.12in}%
+}
+
+\newcommand{\sectiondivider}{%
+  \vspace{0.20in}%
+  {\color{Border}\rule{\linewidth}{1.2pt}}\par
+  \vspace{0.20in}%
+}
+
+\newtcolorbox{questionbox}{
+  colback=SoftBlue,
+  colframe=Blue,
+  boxrule=1.8pt,
+  arc=8pt,
+  left=0.24in,
+  right=0.24in,
+  top=0.18in,
+  bottom=0.18in,
+  before skip=0.18in,
+  after skip=0.08in
+}
+
+\newtcolorbox{calloutbox}[1][]{
+  colback=SoftAmber,
+  colframe=Amber,
+  boxrule=1.3pt,
+  arc=7pt,
+  left=0.22in,
+  right=0.22in,
+  top=0.15in,
+  bottom=0.15in,
+  before skip=0.12in,
+  after skip=0.12in,
+  #1
+}
+
+\newtcolorbox{scopebox}{
+  colback=SoftGray,
+  colframe=Border,
+  boxrule=1.0pt,
+  arc=7pt,
+  left=0.22in,
+  right=0.22in,
+  top=0.15in,
+  bottom=0.15in,
+  before skip=0.14in,
+  after skip=0.08in
+}
+
+\newcommand{\metaitem}[2]{\textcolor{Navy}{\bfseries #1}\ #2}
+\newcommand{\separator}{\hspace{0.25in}\textcolor{Border}{|}\hspace{0.25in}}
+\newcommand{\takeawaynum}[1]{%
+  \tikz[baseline=(n.base)]\node[circle,fill=Navy,text=white,font=\bfseries\fontsize{17}{18}\selectfont,inner sep=4.5pt] (n) {#1};%
+}
+
+\begin{document}
+\BodyFont
+
+% Header
+\begin{tcolorbox}[
+  colback=Navy,
+  colframe=Navy,
+  boxrule=0pt,
+  arc=10pt,
+  left=0.48in,
+  right=0.48in,
+  top=0.30in,
+  bottom=0.28in,
+  height=3.25in
+]
+\begin{minipage}[c][2.55in][c]{0.77\linewidth}
+  {\color{white}\bfseries\fontsize{78}{84}\selectfont Attention Beyond the Training Length}\par
+  \vspace{0.12in}
+  {\color{white!88}\fontsize{31}{37}\selectfont
+    How Score Scaling Controls Length Generalization in a Reduced Binary Attention Classifier}
+\end{minipage}%
+\hfill
+\begin{minipage}[c][2.55in][c]{0.20\linewidth}
+  \RaggedLeft
+  {\color{white}\bfseries\fontsize{29}{34}\selectfont Aaron Shin}\par
+  \vspace{0.10in}
+  {\color{white!82}\fontsize{20}{25}\selectfont Deep Network Understanding Lab\\Dickinson College}
+\end{minipage}
+\end{tcolorbox}
+
+\vspace{0.32in}
+
+% Three reading regions built on a 1 + 2 + 1 column grid.
+\noindent
+\begin{minipage}[t]{9.30in}
+\vspace{0pt}
+\begin{contentcard}[height=3.85in]
+\sectionheading{Motivation}
+Training on short sequences does not guarantee reliable performance on much
+longer inputs \textbf{[2]}. As sequence length grows, the target must compete
+with more non-target tokens for the same attention budget.
+\end{contentcard}
+
+\vspace{0.28in}
+\begin{contentcard}[height=3.35in]
+\sectionheading{Research Question}
+\begin{questionbox}
+\centering\QuestionFont\bfseries\color{Navy}
+How must attention sharpen with length to remain concentrated on the target?
+\end{questionbox}
+\end{contentcard}
+
+\vspace{0.28in}
+\begin{contentcard}[height=17.04in]
+\begin{minipage}[t][16.35in][t]{\linewidth}
+\vspace{0pt}
+\sectionheading{Why Fixed Attention Dilutes with Length}
+The model detects whether a designated target token is present in the sequence.
+
+\vfill
+\begin{center}
+\begin{tikzpicture}[
+  x=1in,
+  y=1in,
+  token/.style={minimum width=0.49in,minimum height=0.49in,rounded corners=4pt,draw=Border,line width=1pt,font=\fontsize{18}{20}\selectfont},
+  non/.style={token,fill=SoftGray},
+  target/.style={token,fill=SoftRose,draw=Rose,line width=2pt},
+  label/.style={font=\bfseries\fontsize{18}{21}\selectfont,text=Navy},
+  note/.style={font=\fontsize{16}{19}\selectfont,text=Muted}
+]
+  \node[label,anchor=east] at (1.55,1.10) {Short sequence};
+  \node[target] at (2.00,1.10) {\textcolor{Rose}{\bfseries T}};
+  \foreach \x in {2.65,3.30,3.95} {\node[non] at (\x,1.10) {N};}
+  \node[note,anchor=west] at (4.30,1.10) {same target advantage};
+
+  \node[label,anchor=east] at (1.55,0.15) {Long sequence};
+  \node[target] at (2.00,0.15) {\textcolor{Rose}{\bfseries T}};
+  \foreach \x in {2.55,3.10,3.65,4.20,4.75,5.30,5.85,6.40} {\node[non,minimum width=0.42in] at (\x,0.15) {N};}
+  \draw[decorate,decoration={brace,mirror,amplitude=6pt},Muted,line width=1.4pt]
+    (2.28,-0.20) -- (6.68,-0.20)
+    node[midway,below=0.12in,note] {increasing aggregate non-target weight};
+\end{tikzpicture}
+\end{center}
+
+\vfill
+The target retains an advantage over every individual non-target, but the
+non-targets grow in number and dominate in aggregate.
+
+\vfill
+\begin{tcolorbox}[colback=SoftGray,colframe=Border,boxrule=1pt,arc=6pt,left=0.20in,right=0.20in,top=0.17in,bottom=0.16in]
+\SmallFont
+Let $p_t(n)$ be the target's share of attention. With target score $a$ and
+$n-1$ identical non-target scores $b$, standard softmax attention \textbf{[1]}
+reduces to
+\[
+  p_t(n)=
+  \frac{\exp(a)}{\exp(a)+(n-1)\exp(b)}
+  =\frac{1}{1+(n-1)\exp(-\Delta)}.
+\]
+\[\Delta=a-b>0.\]
+For any fixed target--non-target score margin $\Delta$, $p_t(n)\to0$ as the
+number of competitors grows without bound.
+\end{tcolorbox}
+
+\vfill
+\begin{tcolorbox}[colback=SoftBlue,colframe=Blue,boxrule=1.2pt,arc=7pt,left=0.20in,right=0.20in,top=0.16in,bottom=0.16in]
+\textbf{A fixed score margin separates the target from each non-target, but
+cannot offset their growing aggregate weight.}
+\end{tcolorbox}
+
+\centering\color{Blue}\bfseries
+What if the effective score margin grows with sequence length?
+\end{minipage}
+\end{contentcard}
+\end{minipage}%
+\hspace{0.45in}%
+\begin{minipage}[t]{19.40in}
+\vspace{0pt}
+\begin{contentcard}[height=9.15in]
+\sectionheading{How Length-Aware Scaling Counters Dilution}
+\begin{center}
+\begin{tikzpicture}[
+  >=Latex,
+  stage/.style={draw=Border,fill=SoftGray,rounded corners=7pt,line width=1.2pt,minimum height=1.14in,align=center,font=\bfseries\fontsize{18}{22}\selectfont,text=Navy},
+  arrow/.style={->,line width=2.2pt,draw=Blue}
+]
+  \node[stage,text width=2.55in] (tokens) {Token sequence\\[-1pt]\textcolor{Rose}{T}\quad N\quad N\quad $\cdots$};
+  \node[stage,text width=2.85in,right=0.26in of tokens] (scores) {Final query scores all tokens\\[3pt]$S_n=(a,b,b,\ldots,b)$};
+  \node[stage,text width=3.10in,right=0.26in of scores,fill=SoftBlue,draw=Blue] (softmax) {Length-scaled softmax\\[3pt]$\operatorname{softmax}\!\big(\alpha(n)S_n\big)$};
+  \node[stage,text width=3.15in,right=0.26in of softmax] (sum) {Attention-weighted sum\\[3pt]$o(n)=\big(p_t(n),1-p_t(n)\big)$};
+  \node[stage,text width=2.65in,right=0.26in of sum] (head) {Linear classifier\\[3pt]Target absent / present};
+  \draw[arrow] (tokens) -- (scores);
+  \draw[arrow] (scores) -- (softmax);
+  \draw[arrow] (softmax) -- (sum);
+  \draw[arrow] (sum) -- (head);
+\end{tikzpicture}
+\end{center}
+
+{\TinyFont\color{Muted}
+A single final-position query attends over one-hot token embeddings; the
+embeddings are reused as values, with no learned value projection.}
+
+Before softmax, all attention scores are multiplied by a positive factor
+$\alpha(n)$. The ranking is unchanged, but the effective score margin grows
+from $\Delta$ to $\alpha(n)\Delta$.
+
+\vspace{0.06in}
+\noindent
+\begin{minipage}[t]{0.315\linewidth}
+\begin{tcolorbox}[height=2.75in,colback=SoftGray,colframe=Charcoal,boxrule=1.5pt,arc=7pt,left=0.16in,right=0.16in,top=0.13in,bottom=0.10in]
+\centering\ModeFont
+{\bfseries\fontsize{28}{32}\selectfont Constant}\par
+\vspace{0.06in}
+{\fontsize{29}{34}\selectfont $\alpha(n)=1$}\par
+\vspace{0.08in}
+No response to sequence length\par
+\vfill
+{\bfseries\fontsize{26}{31}\selectfont $p_t(n)\to0$}
+\end{tcolorbox}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.315\linewidth}
+\begin{tcolorbox}[height=2.75in,colback=SoftBlue,colframe=Blue,boxrule=1.5pt,arc=7pt,left=0.16in,right=0.16in,top=0.13in,bottom=0.10in]
+\centering\ModeFont
+{\bfseries\fontsize{28}{32}\selectfont Log}\par
+\vspace{0.06in}
+{\fontsize{29}{34}\selectfont $\alpha(n)=\log n$}\par
+\vspace{0.08in}
+Preset logarithmic growth\par
+\vfill
+{\bfseries\fontsize{25}{30}\selectfont $p_t(n)\to1$ if $\Delta>1$}
+\end{tcolorbox}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.315\linewidth}
+\begin{tcolorbox}[height=2.75in,colback=SoftRose,colframe=Rose,boxrule=1.5pt,arc=7pt,left=0.16in,right=0.16in,top=0.13in,bottom=0.10in]
+\centering\ModeFont
+{\bfseries\fontsize{28}{32}\selectfont Learned log}\par
+\vspace{0.06in}
+{\fontsize{27}{32}\selectfont $\alpha(n)=1+c\log(1+n)$}\par
+\vspace{0.08in}
+Optimization learns $c>0$\par
+\vfill
+{\bfseries\fontsize{25}{30}\selectfont $p_t(n)\to1$ if $c\Delta>1$}
+\end{tcolorbox}
+\end{minipage}
+
+\begin{tcolorbox}[colback=white,colframe=Navy,boxrule=1.4pt,arc=6pt,left=0.20in,right=0.20in,top=0.12in,bottom=0.12in,before skip=0.13in]
+\centering\SmallFont
+\textbf{Asymptotic criterion}\qquad
+$p_t(n)\to1\ \Longleftrightarrow\
+\alpha(n)\Delta-\log(n-1)\to+\infty.$\\[3pt]
+The effective score margin must outgrow the logarithm of the number of
+non-target competitors.
+\end{tcolorbox}
+\end{contentcard}
+
+\vspace{0.28in}
+\begin{contentcard}[height=15.37in]
+\begin{minipage}[t][14.68in][t]{\linewidth}
+\vspace{0pt}
+\sectionheading{Same Training-Length Accuracy. Sharply Different Long-Length Behavior.}
+\begin{center}
+{\fontsize{21}{25}\selectfont
+\metaitem{TRAIN:}{$n=10$}\separator
+\metaitem{EVALUATE:}{$n=10$ to $10^7$}\separator
+\metaitem{5 RANDOM SEEDS}{}}
+\end{center}
+
+\vfill
+\begin{center}
+\includegraphics[width=18.40in]{../figures/poster_target_attention_by_length.pdf}
+\end{center}
+
+\vfill
+{\SmallFont\color{Muted}
+Representative runs evaluated from the training length to $10^7$. Means over
+five seeds; bands show $\pm1$ s.d.}
+
+\vfill
+\begin{calloutbox}
+\SmallFont
+\textbf{Same Margin, Different Outcome.} Constant (50) and Learned log (200)
+both learn $\Delta\approx9$, yet their positive accuracy at $n=10^7$ is
+\textbf{0\% versus 100\%}. This comparison isolates length scaling from the raw
+learned score margin.
+\end{calloutbox}
+\end{minipage}
+\end{contentcard}
+\end{minipage}%
+\hspace{0.45in}%
+\begin{minipage}[t]{9.30in}
+\vspace{0pt}
+\begin{contentcard}[height=11.30in]
+\sectionheading{Learned-Log Threshold}
+\begin{center}
+\includegraphics[width=8.35in]{../figures/poster_learned_log_threshold.pdf}
+\end{center}
+
+{\SmallFont\color{Muted}
+The learned growth rate crosses $c\Delta=1$ between the 100- and 200-epoch
+checkpoints. Points show means over five seeds; error bars show $\pm1$ s.d.}
+
+\begin{calloutbox}
+\SmallFont
+\textbf{A Finite Pass Can Hide Later Failure.} Every learned-log checkpoint
+reaches 100\% accuracy at $n=10^7$, but only the 200- and 400-epoch checkpoints
+satisfy $c\Delta>1$. The earlier checkpoints are predicted to fail at still
+greater lengths.
+\end{calloutbox}
+\end{contentcard}
+
+\vspace{0.28in}
+\begin{contentcard}[height=7.30in]
+\sectionheading{Key Takeaways \& Scope}
+\takeawaynum{1}\hspace{0.10in}\textbf{Fixed scaling postpones, but cannot
+prevent, target-attention dilution.}
+
+{\SmallFont Any fixed target--non-target score margin is eventually overwhelmed
+by the growing aggregate non-target weight.}
+
+\vspace{0.16in}
+\takeawaynum{2}\hspace{0.10in}\textbf{Sufficiently strong logarithmic
+sharpening can prevent dilution.}
+
+{\SmallFont Target attention converges to one when $\Delta>1$ for Log or
+$c\Delta>1$ for Learned log.}
+
+\begin{scopebox}
+\SmallFont
+\textbf{Scope.} These thresholds are exact for the reduced two-score classifier
+studied here; whether analogous conditions hold in full transformers remains
+open.
+\end{scopebox}
+\end{contentcard}
+
+\vspace{0.28in}
+\begin{contentcard}[height=5.64in]
+\begin{minipage}[t][4.95in][t]{\linewidth}
+\vspace{0pt}
+\sectionheading{References \& Acknowledgments}
+\TinyFont
+\textbf{[1]} Vaswani et al. (2017). \textit{Attention Is All You Need.}
+NeurIPS.\par
+\textbf{[2]} Press et al. (2022). \textit{Train Short, Test Long: Attention
+with Linear Biases Enables Input Length Extrapolation.} ICLR.
+
+\vfill
+\textbf{Acknowledgments.} I thank Professor MacCormick for proposing the
+reduced-model direction and for guidance on the scope and presentation of this
+work.
+\end{minipage}
+\end{contentcard}
+\end{minipage}
+
+\end{document}

@@ -111,6 +111,19 @@ Layout allocation:
 - Keep the main result centered across the middle two columns rather than
   placing all figures at the far right.
 
+Implementation status:
+
+- Refined 40 x 30 inch full-layout draft assembled in `latex/POSTER.tex`.
+- The four-column grid is implemented as three reading regions: left one
+  column, center two columns, and right one column.
+- All confirmed copy, equations, schematic content, and result figures are
+  placed in the first draft.
+- The three reading regions retain segmented section cards. Card heights vary
+  with content, but their totals and lower baselines are matched across the
+  three regions.
+- Flexible space inside the largest cards is distributed between logical
+  content blocks instead of accumulating as a single empty area at the bottom.
+
 Sections intentionally omitted or combined:
 
 - Do not include a separate Abstract; the header and Motivation block perform
@@ -211,7 +224,7 @@ growing-competition mechanism without introducing technical notation.
 ### Status
 
 - Copy: confirmed
-- Visual treatment: not started
+- Visual treatment: first full-layout draft complete
 
 ## Section 1: Why Fixed Attention Dilutes with Length
 
@@ -304,7 +317,7 @@ Possible bridge:
 
 - Copy: first complete draft
 - Formal statement: complete
-- Visual: not started
+- Visual: first full-layout draft complete
 
 ## Reduced Model Schematic
 
@@ -400,7 +413,7 @@ vector, it has no separate mean, max, or learned pooling layer.
 
 - Content: first complete draft
 - Terminology: attention-weighted sum confirmed
-- Visual: not started
+- Visual: first full-layout draft complete
 
 ## Section 2: How Length-Aware Scaling Counters Dilution
 
@@ -428,17 +441,6 @@ quickly this effective margin grows relative to the non-target competition.
 > Before softmax, all attention scores are multiplied by a positive factor
 > $\alpha(n)$. The ranking is unchanged, but the effective score margin grows
 > from $\Delta$ to $\alpha(n)\Delta$.
-
-#### Intervention Diagram
-
-```text
-Score margin          Length-dependent scaling          Effective margin
-    Delta         --------- x alpha(n) --------->        alpha(n) Delta
-```
-
-The rendered diagram should use mathematical notation for $\Delta$,
-$\alpha(n)$, and $\alpha(n)\Delta$ rather than the plain-text placeholders
-above.
 
 ### Scaling Modes
 
@@ -503,8 +505,6 @@ Optional technical note:
 
 ### Visual Specification
 
-- Begin with a compact left-to-right transformation from $\Delta$ to
-  $\alpha(n)\Delta$.
 - State that the multiplier changes attention sharpness without changing the
   score ordering.
 - Present Constant, Log, and Learned log as three horizontally aligned cards
@@ -528,7 +528,7 @@ Optional technical note:
 
 - Copy: first complete draft
 - Formal criterion: complete
-- Visual: not started
+- Visual: refined full-layout draft complete
 
 ## Section 3: Results
 
@@ -596,7 +596,7 @@ Recommended visual identities:
   upward-triangle marker
 
 Include the learned-log epoch budgets and $c\Delta$ values in the legend. Since
-Log (50) and Learned log (200) overlap near $p_t(n)=1$, so draw the latter as
+Log (50) and Learned log (200) overlap near $p_t(n)=1$, draw the latter as
 a wider solid line beneath the narrower dash-dot Log line and alternate their
 marker positions. This keeps both series visible along the shared path.
 
@@ -734,4 +734,4 @@ Results section.
 
 - Takeaway copy: confirmed
 - Scope copy: confirmed
-- Visual: not started
+- Visual: first full-layout draft complete
