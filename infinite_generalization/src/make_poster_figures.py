@@ -33,6 +33,7 @@ SEEDS = (0, 1, 2, 3, 4)
 TEXT = "#202124"
 MUTED = "#5F6368"
 GRID = "#DADCE0"
+NAVY = "#19324D"
 CONSTANT = "#4D4D4D"
 LOG = "#0072B2"
 LEARNED_BELOW = "#C47A35"
@@ -186,7 +187,7 @@ def save_figure(fig: plt.Figure, output_dir: Path, stem: str) -> None:
 
 
 def plot_target_attention(output_dir: Path) -> None:
-    fig, ax = plt.subplots(figsize=(12.0, 6.2))
+    fig, ax = plt.subplots(figsize=(12.0, 7.4))
     handles = []
 
     for spec in ATTENTION_RUNS:
@@ -224,25 +225,54 @@ def plot_target_attention(output_dir: Path) -> None:
     ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}"))
     ax.set_xlabel("Sequence length $n$", fontsize=18, labelpad=10)
     ax.set_ylabel("Target attention $p_t(n)$", fontsize=18, labelpad=10)
-    fig.suptitle(
-        "Target Attention Diverges Beyond the Training Length",
-        fontsize=21,
-        fontweight="semibold",
-        x=0.105,
-        y=0.97,
-        ha="left",
-    )
     style_axis(ax)
+
+    # The poster card heading carries the message, so the figure itself has no
+    # title; the former callout lives inside the empty central plot region.
+    ax.annotate(
+        "",
+        xy=(4.0e6, 0.955),
+        xytext=(1.3e6, 0.575),
+        arrowprops=dict(arrowstyle="->", color=MUTED, lw=1.7, shrinkA=4, shrinkB=2),
+        zorder=2,
+    )
+    ax.annotate(
+        "",
+        xy=(4.0e6, 0.055),
+        xytext=(1.3e6, 0.33),
+        arrowprops=dict(arrowstyle="->", color=MUTED, lw=1.7, shrinkA=4, shrinkB=2),
+        zorder=2,
+    )
+    ax.text(
+        5.0e5,
+        0.505,
+        "Same margin, opposite outcomes",
+        fontsize=16.5,
+        fontweight="semibold",
+        color=NAVY,
+        ha="center",
+        va="center",
+    )
+    ax.text(
+        5.0e5,
+        0.44,
+        "both learn $\\Delta\\approx9$\npositive accuracy at $n=10^7$: 0% vs 100%",
+        fontsize=13.2,
+        color=TEXT,
+        ha="center",
+        va="top",
+        linespacing=1.5,
+    )
 
     legend_order = (0, 3, 1, 2)
     fig.legend(
         [handles[index] for index in legend_order],
         [ATTENTION_RUNS[index].label for index in legend_order],
         loc="upper center",
-        bbox_to_anchor=(0.55, 0.88),
+        bbox_to_anchor=(0.545, 1.0),
         ncol=4,
         frameon=False,
-        fontsize=12.2,
+        fontsize=12.6,
         handlelength=2.5,
         handletextpad=0.5,
         columnspacing=1.25,
@@ -250,7 +280,7 @@ def plot_target_attention(output_dir: Path) -> None:
 
     # Keep the poster footprint unchanged while giving the data region more
     # vertical space by tightening the internal top and bottom margins.
-    fig.subplots_adjust(left=0.105, right=0.985, bottom=0.145, top=0.79)
+    fig.subplots_adjust(left=0.09, right=0.985, bottom=0.125, top=0.91)
     save_figure(fig, output_dir, "poster_target_attention_by_length")
 
 
@@ -320,16 +350,21 @@ def plot_learned_threshold(output_dir: Path) -> None:
     ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:g}"))
     ax.set_xlabel("Training checkpoint (epochs)", fontsize=17, labelpad=10)
     ax.set_ylabel("Learned growth rate $c\\Delta$", fontsize=17, labelpad=10)
-    ax.set_title(
-        "Learned Scaling Crosses the Threshold",
-        fontsize=19,
-        fontweight="semibold",
-        loc="left",
-        pad=16,
-    )
     style_axis(ax, horizontal_grid_only=True)
 
-    fig.subplots_adjust(left=0.18, right=0.98, bottom=0.16, top=0.85)
+    # The benchmark fact lives inside the otherwise empty below-threshold band
+    # so the poster callout can stay a single interpretive sentence.
+    ax.text(
+        1.5,
+        0.475,
+        "every checkpoint reaches 100% accuracy at $n=10^7$",
+        fontsize=13.2,
+        color=MUTED,
+        ha="center",
+        va="center",
+    )
+
+    fig.subplots_adjust(left=0.16, right=0.975, bottom=0.14, top=0.965)
     save_figure(fig, output_dir, "poster_learned_log_threshold")
 
 

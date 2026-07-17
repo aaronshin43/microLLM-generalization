@@ -116,13 +116,18 @@ Implementation status:
 - Refined 40 x 30 inch full-layout draft assembled in `latex/POSTER.tex`.
 - The four-column grid is implemented as three reading regions: left one
   column, center two columns, and right one column.
-- All confirmed copy, equations, schematic content, and result figures are
-  placed in the first draft.
 - The three reading regions retain segmented section cards. Card heights vary
   with content, but their totals and lower baselines are matched across the
   three regions.
-- Flexible space inside the largest cards is distributed between logical
-  content blocks instead of accumulating as a single empty area at the bottom.
+- Second-pass text reduction: Motivation and the research question share one
+  opening card, repeated claim statements collapse into single punchline
+  boxes, in-figure titles are removed, captions state only the seed and band
+  convention, and the schematic technical note and the Section 1 bridge line
+  are dropped.
+- Second-pass visual consistency: punchline statements share one navy
+  left-bar insight style, structural accents (heading rules, schematic arrows,
+  highlighted softmax stage) use navy, the target token is navy in every
+  diagram, and the references card is sized to its content.
 
 Sections intentionally omitted or combined:
 
@@ -224,7 +229,9 @@ growing-competition mechanism without introducing technical notation.
 ### Status
 
 - Copy: confirmed
-- Visual treatment: first full-layout draft complete
+- Visual treatment: merged with the research question into one opening card;
+  the question keeps its highlighted box and no separate Research Question
+  heading is used
 
 ## Section 1: Why Fixed Attention Dilutes with Length
 
@@ -251,34 +258,41 @@ to preserve the target's share of attention as sequence length increases.
 
 #### Main Explanation
 
-> The target retains an advantage over every individual non-target, but the
-> non-targets grow in number and dominate in aggregate.
+The former prose sentence ("The target retains an advantage over every
+individual non-target, but the non-targets grow in number and dominate in
+aggregate") is delivered visually: each scene pairs the token row with a
+target-share bar, and the bar's target segment shrinks in the long scene. The
+only remaining prose claim is the equation-takeaway box.
 
 #### Visual Labels
 
-- Short sequence
-- Long sequence
-- Same target advantage
-- Increasing aggregate non-target weight
+- Short sequence / Long sequence
+- same target advantage in both
+- more non-targets
+- target's share of attention / all non-targets combined (on the share bars)
+- (schematic)
 
 ### Formal Statement
 
 Let $p_t(n)$ denote the share of attention assigned to the target token in a
 length-$n$ sequence. With one target score $a$ and $n-1$ identical non-target
-scores $b$, standard softmax attention [1] reduces to
+scores $b$, standard softmax attention [1] reduces on the poster to the single
+display
 
 ```math
 p_t(n)
 =
-\frac{\exp(a)}{\exp(a)+(n-1)\exp(b)}
-=
-\frac{1}{1+(n-1)\exp(-\Delta)},
+\frac{1}{1+(n-1)\,e^{-\Delta}}
+\;\longrightarrow\;
+0
+\quad\text{as } n\to\infty,
 \qquad
 \Delta=a-b>0.
 ```
 
-For any fixed target--non-target score margin $\Delta$, $p_t(n)\to0$ as the
-number of non-target competitors grows without bound.
+The intermediate $\exp(a)/(\exp(a)+(n-1)\exp(b))$ form and the prose
+conclusion are omitted; the limit is folded into the display and the words are
+carried by the equation-takeaway box.
 
 Equation takeaway:
 
@@ -309,15 +323,15 @@ attention rule.
 
 ### Transition to Section 2
 
-Possible bridge:
-
-> What if the effective score margin grows with sequence length?
+No bridge line is used. The research question in the opening card already asks
+it, and the Section 2 heading answers it.
 
 ### Status
 
-- Copy: first complete draft
-- Formal statement: complete
-- Visual: first full-layout draft complete
+- Copy: reduced to the task sentence plus the two boxed statements
+- Formal statement: single-form display with the limit folded in
+- Visual: refined draft with a target-share bar under each scene and a navy
+  target token
 
 ## Reduced Model Schematic
 
@@ -387,6 +401,9 @@ The final output labels are **Target absent** and **Target present**.
 > A single final-position query attends over one-hot token embeddings; the
 > embeddings are reused as values, with no learned value projection.
 
+This note is omitted on the poster to reduce text; it remains in the full
+report.
+
 The phrase **attention-weighted sum** should be used instead of **pooled
 output**. Although the model reduces a variable-length sequence to a fixed-size
 vector, it has no separate mean, max, or learned pooling layer.
@@ -400,10 +417,9 @@ vector, it has no separate mean, max, or learned pooling layer.
 - Use the target score $a$ once and the repeated non-target score $b$ to make
   the two-score structure visible without displaying $W_Q$, $W_K$,
   $q_{\mathrm{last}}$, $k_t$, or $k_u$.
-- Highlight the $\alpha(n)$ multiplier using the same accent treatment as the
-  Section 2 intervention diagram.
-- Keep arrows and labels visually dominant; place the technical note below the
-  flow so that a general reader can skip it.
+- Highlight the length-scaled softmax stage with a heavier navy outline; the
+  technical note is omitted on the poster.
+- Keep arrows and labels visually dominant; arrows use the structural navy.
 - Do not add a separate pooling operation, value projection, multi-head block,
   residual connection, or other full-transformer components.
 - A negative-example path is not necessary; the task definition already states
@@ -411,9 +427,9 @@ vector, it has no separate mean, max, or learned pooling layer.
 
 ### Status
 
-- Content: first complete draft
+- Content: first complete draft; technical note omitted on the poster
 - Terminology: attention-weighted sum confirmed
-- Visual: first full-layout draft complete
+- Visual: refined draft with navy arrows and a navy-outlined softmax stage
 
 ## Section 2: How Length-Aware Scaling Counters Dilution
 
@@ -438,9 +454,9 @@ quickly this effective margin grows relative to the non-target competition.
 
 #### Main Explanation
 
-> Before softmax, all attention scores are multiplied by a positive factor
-> $\alpha(n)$. The ranking is unchanged, but the effective score margin grows
-> from $\Delta$ to $\alpha(n)\Delta$.
+> Before softmax, every score is multiplied by a positive factor $\alpha(n)$:
+> the ranking is unchanged, but the effective score margin grows from $\Delta$
+> to $\alpha(n)\Delta$.
 
 ### Scaling Modes
 
@@ -560,7 +576,8 @@ TRAIN: n = 10 | EVALUATE: n = 10 to 10^7 | 5 RANDOM SEEDS
 
 #### Figure Title
 
-> **Target Attention Diverges Beyond the Training Length**
+The figure carries no internal title; the Results card heading delivers the
+message and the former title is not repeated inside the plot.
 
 #### Representative Runs
 
@@ -602,27 +619,29 @@ marker positions. This keeps both series visible along the shared path.
 
 #### Figure A Callout
 
-Callout heading:
+The callout is rendered inside the plot's empty central region as a navy
+annotation with two thin arrows to the diverging curve groups:
 
-> **Same Margin, Different Outcome**
+> **Same margin, opposite outcomes**  
+> both learn $\Delta\approx9$  
+> positive accuracy at $n=10^7$: 0% vs 100%
 
-Callout copy:
-
-> Constant (50) and Learned log (200) both learn $\Delta\approx9$, yet their
-> positive accuracy at $n=10^7$ is 0% versus 100%.
-
-This comparison isolates length scaling from the raw learned score margin.
+The former closing sentence ("This comparison isolates length scaling from the
+raw learned score margin") is dropped.
 
 #### Figure A Caption
 
-> Representative runs evaluated from the training length to $10^7$. Curves
-> show means over five seeds; bands show $\pm1$ s.d.
+> Means over five seeds; bands show $\pm1$ s.d.
+
+The evaluated range is not repeated here; the Results metadata line already
+states it.
 
 ### Figure B: Learned-Log Threshold Crossing
 
 #### Figure Title
 
-> **Learned Scaling Crosses the Theoretical Threshold**
+The figure carries no internal title; the right-column card heading
+(Learned-Log Threshold) delivers it.
 
 #### Axes and Marks
 
@@ -636,30 +655,26 @@ This comparison isolates length scaling from the raw learned score margin.
 
 #### Figure B Callout
 
-Callout heading:
+The factual half lives inside the figure: the annotation "every checkpoint
+reaches 100% accuracy at $n=10^7$" sits in the below-threshold band. The
+callout box below the caption keeps only the interpretation:
 
-> **A Finite Pass Can Hide Later Failure**
-
-Callout copy:
-
-> Every learned-log checkpoint reaches 100% accuracy at $n=10^7$, but only the
-> 200- and 400-epoch checkpoints satisfy $c\Delta>1$.
-
-Optional secondary line:
-
-> The earlier checkpoints are predicted to fail at still greater lengths.
+> **A Finite Pass Can Hide Later Failure.** Checkpoints below $c\Delta=1$ pass
+> the $n=10^7$ benchmark yet are predicted to fail at greater lengths.
 
 #### Figure B Caption
 
-> The learned growth rate crosses $c\Delta=1$ between the 100- and 200-epoch
-> checkpoints. Points show means over five seeds; error bars show $\pm1$ s.d.
+> Means over five seeds; error bars show $\pm1$ s.d.
+
+The crossing between the 100- and 200-epoch checkpoints is not restated in
+prose; the labeled values and the threshold line show it.
 
 ### Placement
 
 - Place Figure A across the middle two columns as the largest visual on the
   poster.
 - Place Figure B in the upper portion of the right column.
-- Keep the Figure A callout adjacent to or immediately below the main plot.
+- The Figure A callout lives inside the plot as an annotation.
 - Place the Figure B callout directly below the threshold plot so that it leads
   into the Key Takeaways block.
 
@@ -679,8 +694,9 @@ the two poster claims.
 ### Status
 
 - Figure selection: confirmed
-- Callout copy: first complete draft
-- Figure generation: first draft generated
+- Callout copy: compressed; the factual halves live inside the figures
+- Figure generation: second draft (no internal titles, in-plot annotations,
+  taller main figure)
 
 Generated assets:
 
@@ -701,14 +717,15 @@ Results section.
 #### Takeaway 1
 
 > **Fixed scaling postpones, but cannot prevent, target-attention dilution.**
-> Any fixed target--non-target score margin is eventually overwhelmed by the
-> growing aggregate non-target weight.
+
+The former supporting sentence duplicated the Section 1 insight box and is
+dropped; the bold lead stands alone.
 
 #### Takeaway 2
 
 > **Sufficiently strong logarithmic sharpening can prevent dilution.** Target
-> attention converges to one when $\Delta>1$ for Log or $c\Delta>1$ for Learned
-> log.
+> attention converges to one when $\Delta>1$ (Log) or $c\Delta>1$ (Learned
+> log).
 
 #### Scope
 
@@ -720,8 +737,8 @@ Results section.
 - Place this block below the Figure B callout in the right column.
 - Use two numbered takeaways rather than a paragraph or a separate Conclusion
   section.
-- Set the bold lead sentence of each takeaway larger than its supporting
-  sentence.
+- Set the bold lead sentences large; only Takeaway 2 carries a smaller
+  supporting line.
 - Keep the threshold conditions on the supporting line so that a general reader
   can understand the claim without reading the notation.
 - Separate the Scope statement with a light rule or subtle background, but do
@@ -732,6 +749,6 @@ Results section.
 
 ### Status
 
-- Takeaway copy: confirmed
+- Takeaway copy: confirmed; Takeaway 1 support line dropped on the poster
 - Scope copy: confirmed
-- Visual: first full-layout draft complete
+- Visual: refined draft complete
