@@ -128,6 +128,10 @@ Implementation status:
   left-bar insight style, structural accents (heading rules, schematic arrows,
   highlighted softmax stage) use navy, the target token is navy in every
   diagram, and the references card is sized to its content.
+- Third pass: card interiors use fixed-height regions with flexible gaps so
+  leftover space spreads between blocks instead of pooling at card bottoms,
+  and the Section 1 visual gained a per-token weight-bar layer that shows the
+  unchanged individual advantage alongside the shrinking share.
 
 Sections intentionally omitted or combined:
 
@@ -260,15 +264,19 @@ to preserve the target's share of attention as sequence length increases.
 
 The former prose sentence ("The target retains an advantage over every
 individual non-target, but the non-targets grow in number and dominate in
-aggregate") is delivered visually: each scene pairs the token row with a
-target-share bar, and the bar's target segment shrinks in the long scene. The
-only remaining prose claim is the equation-takeaway box.
+aggregate") is delivered visually. Each scene stacks three layers: a per-token
+attention-weight bar chart (one tall target bar marked $a$, short identical
+non-target bars marked $b$), the token row, and a target-share bar. The weight
+bars are identical across the two scenes while the share bar's target segment
+shrinks, so the unchanged individual advantage and the aggregate loss are both
+visible. The only remaining prose claim is the equation-takeaway box.
 
 #### Visual Labels
 
 - Short sequence / Long sequence
-- same target advantage in both
-- more non-targets
+- attention weight per token (same in both scenes), with $a$ and $b$ marks on
+  the short-scene bars
+- combined weight grows (brace over the long scene's non-target weight bars)
 - target's share of attention / all non-targets combined (on the share bars)
 - (schematic)
 
@@ -330,8 +338,8 @@ it, and the Section 2 heading answers it.
 
 - Copy: reduced to the task sentence plus the two boxed statements
 - Formal statement: single-form display with the limit folded in
-- Visual: refined draft with a target-share bar under each scene and a navy
-  target token
+- Visual: refined draft; each scene stacks weight bars over a baseline, the
+  token row, and a share bar, with a navy target throughout
 
 ## Reduced Model Schematic
 
