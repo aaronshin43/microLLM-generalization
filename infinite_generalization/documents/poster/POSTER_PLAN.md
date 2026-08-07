@@ -593,7 +593,7 @@ show why finite benchmark accuracy does not identify the asymptotic regime.
 
 ### Section Heading
 
-> **Same Training-Length Accuracy. Sharply Different Long-Length Behavior.**
+> **Same Training-Length Accuracy, Different Long-Length Behavior**
 
 Place the Results metadata line immediately below this heading:
 

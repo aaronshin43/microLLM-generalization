@@ -10,7 +10,7 @@ Length generalization is a basic difficulty for sequence models: a classifier ca
 
 The motivating failure mode is attention dilution. Softmax attention divides a fixed budget of attention among all tokens, so a single target token must compete with a crowd of non-targets that grows with the sequence; even a fixed score advantage for the target over each non-target can be overwhelmed once that crowd is large enough. This raises a simple question: can attention be made length-aware, sharpening as the sequence grows, so that the target keeps enough attention at long lengths?
 
-To answer this question, the report studies an intentionally reduced binary classifier with fixed one-hot token values, learned query and key projections, one readout query at the last position, and a linear classifier. Identical non-targets make their attention scores equal, exactly realizing the closed-form theory's two-score structure. The central intervention is a score multiplier controlling how sharply attention concentrates as length grows. The target-attention expression is therefore exact, allowing a controlled test of a trainable model with directly checkable assumptions; the aim is not to propose a competitive architecture.
+To answer this question, this report studies an intentionally reduced binary classifier with fixed one-hot token values, learned query and key projections, one readout query at the last position, and a linear classifier. Because all non-target tokens are identical, they receive the same attention score, allowing the target's attention mass to be written in closed form. The central intervention is a score multiplier controlling how sharply attention concentrates as length grows. This controlled setting allows a direct test of a trainable model with checkable assumptions; the aim is not to propose a competitive architecture.
 
 Experiments across constant, logarithmic, and learned logarithmic scaling match the theory: constant scaling only postpones failure. With log scaling, a target score advantage above 1 makes the target receive essentially all attention at arbitrarily long lengths; learned-log does so once the product of its coefficient and this advantage exceeds 1. A run may still pass at ten million tokens when this product is below 1, although its learned parameters imply eventual failure. No finite benchmark establishes generalization to all lengths: unbounded-length behavior is determined by the target's unnormalized weight relative to the aggregate non-target weight and, at equality, by the learned threshold.
 
@@ -250,9 +250,11 @@ For the learned-log multiplier used in the experiments,
 \alpha(n)=1+c\log(1+n),
 ```
 
-where $c$ is a learned, strictly positive coefficient. In the formal limit
-$c\to0$, $\alpha(n)\to1$, recovering the constant baseline. Using $\log(1+n)$
-keeps the multiplier well-defined at small $n$; neither choice changes the
+where $c$ is a learned, strictly positive coefficient controlling the strength
+of logarithmic growth. A small $c$ can make this mode resemble constant scaling
+over a finite range of lengths, although $\alpha(n)$ still grows without bound
+for every $c>0$. The additive $1$ supplies a length-independent base, while
+using $\log(1+n)$ instead of $\log n$ changes finite-length values but not the
 asymptotic exponent, which is governed by $c\Delta$. Since
 $e^{\alpha(n)\Delta}=e^\Delta(1+n)^{c\Delta}$, the target attention mass is
 
@@ -454,8 +456,9 @@ positive projection along the readout-query direction, whereas the non-target
 key has a negative projection. This geometry produces $a>b$ and hence a
 positive score margin $\Delta$.
 
-The visible alignment, however, is not uniquely determined by the model's
-function, because attention depends only on query-key dot products. For any
+The particular vectors shown here, however, are not uniquely determined by the
+task of detecting a target, because attention depends only on query-key dot
+products. For any
 invertible matrix $M$, transform every query and key as $q_i'=M^\top q_i$ and
 $k_j'=M^{-1}k_j$. Then
 
@@ -475,16 +478,17 @@ between $q_u$ and $k_t-k_u$ is also at least 0.99 in every seed,
 showing that this training setup consistently reaches a similarly aligned
 parameterization, but the cosine is not a functionally necessary condition.
 
-This separation connects the learned weights to the length-scaling analysis.
-The query and key projections create the target advantage $\Delta$, while the
-multiplier determines whether that advantage survives the growing number of
-non-target positions. Under constant scaling, the growing non-target mass
+The resulting score margin $\Delta$ links the learned weights to the
+length-scaling analysis. The query and key projections determine this margin,
+while the multiplier determines whether the effective margin
+$\alpha(n)\Delta$ grows quickly enough to offset the growing aggregate
+non-target weight. Under constant scaling, the growing non-target mass
 eventually overwhelms any finite $\Delta$; log scaling gives $p_t(n)\to1$
 when $\Delta>1$; learned-log scaling does so when $c\Delta>1$.
 
 ## Discussion
 
-The report's controlled, trainable two-token construction makes the two-score
+This report's controlled, trainable two-token construction makes the two-score
 structure hold by design, so the exact target-attention equation isolates
 length-aware scaling from other transformer components.
 
