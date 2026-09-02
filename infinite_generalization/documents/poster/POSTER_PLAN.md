@@ -4,7 +4,7 @@
 
 - Size: 40 x 30 inches
 - Orientation: landscape
-- Grid: four columns with two primary content rows
+- Grid: four-column-inspired layout with three unequal reading regions
 - Audience: a general academic audience, including readers without prior
   attention or length-generalization knowledge
 - Style: minimal text, calm tone, and accessible language
@@ -25,51 +25,80 @@ Supporting message:
 
 Results framing:
 
-> Same training-length accuracy. Sharply different long-length behavior.
+> Same training-length accuracy. Different long-length behavior.
 
 ## Header
 
 ### Main Title
 
-> **Attention Beyond the Training Length**
-
-### Subtitle
-
-> **How Score Scaling Controls Length Generalization in a Reduced Binary
-> Attention Classifier**
+> **How Score Scaling Shapes Attention Beyond the Training Length**
 
 ### Author and Affiliation
 
-> **Aaron Shin**  
-> Deep Network Understanding Lab, Dickinson College
+> **Aaron Shin '27**
+>
+> Deep Network Understanding Lab
+>
+> Department of Mathematics and Computer Science, Dickinson College
+
+### Advisor
+
+> Advisor: Prof. John MacCormick
 
 ### Visual Specification
 
-- Set the main title as the largest text on the poster.
-- Place the subtitle directly below it at a clearly subordinate size.
-- Keep the author and affiliation visually separate from the title block.
-- Do not add another central-claim sentence to the header; the subtitle and the
-  Motivation block already establish the topic and scope.
+- Set the main title as the largest text on the poster, reduced from 78 pt to
+  64 pt so that it fits between the logos without wrapping.
+- Omit the subtitle; the main title now identifies score scaling directly.
+- Center all header lines. Place the author and advisor on one shared line below
+  the title, separated by a subtle vertical divider.
+- Keep the author bold and the advisor slightly smaller, explicitly labeled
+  Advisor rather than implying coauthorship.
+- Use 32 pt for the author, 28 pt for the advisor, and 26 pt for both affiliation
+  lines, a 2 pt increase for each while preserving the title and logo sizes.
+- Place the lab on the next line, followed by the department and college together
+  on the final line, moving from the specific research group to the institution.
+- Do not add another central-claim sentence to the header.
+- Use three vertically centered header columns: Dickinson wordmark on the left,
+  title and author/affiliation block in the middle, and DNU Lab logo on the right.
+  Reserve 12%, 76%, and 12% of the header's inner width, respectively.
+- Preserve both logos' original colors and proportions. Use the transparent
+  wordmark directly on the navy background at 4.10 inches wide, with no white
+  panel. Enlarge the square DNU logo from 1.50 to 2.35 inches high.
+- Increase the outer header height from 3.25 to 3.80 inches and vertically center
+  its contents in the enlarged card. Set the header-to-body gap explicitly to
+  0.28 inches, absorbing the former excess gap into the header while preserving
+  the body placement and layout.
+- Use `assets/dickinson_wordmark.png` and `assets/dnu_logo.pdf`, the latter a
+  vector export of the supplied `assets/dnu_logo.svg`.
 
 ### Status
 
 - Main title: confirmed
-- Subtitle: confirmed
+- Subtitle: removed
 - Author and affiliation: confirmed
+- Advisor: explicit role placed beside the author
+- Logos: transparent Dickinson wordmark and enlarged DNU logo flank the full
+  title and affiliation block
 
 ## Overall Storyboard
 
 1. **Motivation and research question:** state the short-to-long generalization
    problem and ask when length-aware attention prevents target dilution.
-2. **Why fixed attention dilutes with length:** introduce the task and contrast
-   an individual target advantage with the growing aggregate non-target weight.
+2. **Task & Setup and Why Attention Dilutes:** introduce the two-token
+   detection task and reduced model in one card, then use a separate card to
+   contrast an individual target advantage with growing non-target competition.
 3. **Model and score scaling:** introduce constant, logarithmic, and learned
    logarithmic score scaling.
 4. **Results:** state the training length, evaluation range, and number of seeds
-   in one metadata line, then use a large central figure and a smaller
-   learned-log threshold plot to show how the modes diverge beyond training.
-5. **Key takeaways:** state the two central conclusions and one scope note.
-6. **References and acknowledgments:** place a short reference list and
+   in one metadata line, then use a large central figure to show how the modes
+   diverge beyond training.
+5. **Attention in Closed Form:** collect the optional mathematical explanation
+   in an upper-right card, using the scaled softmax expression for all modes.
+6. **Conclusion and Scope:** state the two central conclusions, contrast an
+   observed finite pass with predicted eventual failure, and give the scope
+   of the analysis in a separate card.
+7. **References and acknowledgments:** place a short reference list and
    acknowledgment in the lower-right corner.
 
 ## Overall Layout
@@ -80,33 +109,38 @@ that the main result occupies the physical center of the poster.
 
 ```text
 +------------------+--------------------------------+------------------+
-| TITLE, SUBTITLE, AUTHORS, AND AFFILIATION                             |
+| TITLE, AUTHOR, ADVISOR, AND AFFILIATIONS                              |
 +------------------+--------------------------------+------------------+
-|                  | MODEL AND SCORE SCALING        | LEARNED-LOG      |
-| MOTIVATION AND   |                                | THRESHOLD        |
-| RESEARCH         | Constant | Log | Learned log   |                  |
-| QUESTION         |                                | c Delta versus   |
-|                  |                                | epochs           |
-| WHY FIXED        +--------------------------------+------------------+
-| ATTENTION        | RESULTS                        | KEY TAKEAWAYS    |
-| DILUTES          | Train n=10 | Test to 10^7      |                  |
-|                  |                                | Two conclusions  |
-| Task visual      | Target attention versus       | One scope note   |
-|                  | sequence length               +------------------+
-| Closed-form      |                                | REFERENCES       |
-| equation         | Large central figure           | ACKNOWLEDGMENTS  |
-|                  |                                |                  |
+| MOTIVATION AND   | MODEL AND SCORE SCALING         | ATTENTION IN     |
+| RESEARCH QUESTION|                                | CLOSED FORM      |
+|                  | Constant | Log | Learned log   | Scaled softmax   |
+|                  |                                +------------------+
+| TASK & SETUP     |                                | CONCLUSION       |
+| Task + model     +--------------------------------+ Two conclusions  |
+|                  | RESULTS                        |                  |
+|------------------| Train n=10 | Test to 10^7       | Observed pass /  |
+| WHY ATTENTION    |                                | predicted failure|
+| DILUTES          | Target attention versus        +------------------+
+|                  | sequence length                | SCOPE            |
+| Short/long visual|                                |                  |
+|                  | Large central figure           +------------------+
+|                  |                                | REFERENCES &     |
+|                  |                                | ACKNOWLEDGMENTS  |
 +------------------+--------------------------------+------------------+
 ```
 
 Layout allocation:
 
-- The left column contains Motivation and Research Question above the Section
-  1 task visual and closed-form explanation.
+- The left column contains three cards: Motivation with its integrated
+  research question, Task & Setup with the input examples and model sentence,
+  and Why Attention Dilutes with the short/long schematic and its intuitive
+  explanation. The model sentence is ordinary body text below the examples,
+  without a Model subheading.
 - The middle two columns contain Section 2 in the upper row, and the Results
   metadata line and large main result in the lower row.
-- The right column contains the learned-log threshold plot, Key Takeaways, the
-  scope statement, References, and Acknowledgments.
+- The right column contains Attention in Closed Form, Conclusion, Scope, and
+  References & Acknowledgments as four separate cards. The learned-log
+  threshold plot is omitted.
 - Do not use a full-width References or Acknowledgments footer.
 - Keep the main result centered across the middle two columns rather than
   placing all figures at the far right.
@@ -114,8 +148,10 @@ Layout allocation:
 Implementation status:
 
 - Refined 40 x 30 inch full-layout draft assembled in `latex/POSTER.tex`.
-- The four-column grid is implemented as three reading regions: left one
-  column, center two columns, and right one column.
+- The four-column grid is implemented as three reading regions: 9.30 inches
+  on the left, 20.40 inches in the center, and 8.30 inches on the right, with
+  0.45-inch gutters. The right region was narrowed by one inch to give the
+  central results more space after removing the threshold plot.
 - The three reading regions retain segmented section cards. Card heights vary
   with content, but their totals and lower baselines are matched across the
   three regions.
@@ -132,6 +168,35 @@ Implementation status:
   leftover space spreads between blocks instead of pooling at card bottoms,
   and the Section 1 visual gained a per-token weight-bar layer that shows the
   unchanged individual advantage alongside the shrinking share.
+- Left-column organization: use three outer cards, with Motivation at 4.15
+  inches, Task & Setup at 5.75 inches, and Why Attention Dilutes at 14.34
+  inches, separated by 0.28-inch gaps. Preserve the original column height
+  and bottom edge. Card headings use 34 pt type and body copy remains 26 pt.
+  Neither Task nor Model has a separate subheading. Distribute the extra
+  0.60 inches in Task & Setup around the input examples and model sentence;
+  reduce Why Attention Dilutes by the same amount without shrinking its graphic.
+- Keep the fixed-score-advantage explanation in regular 24 pt type with 29 pt
+  leading above the schematic, with no box or left rule. Move the softmax
+  formula out of this card. Increase the gap between the short/long scenes
+  by 1.28 inches before scaling, enlarge the whole schematic uniformly by
+  6%, and increase the base scene-label, note, and share-bar-label sizes to
+  25 pt, 20 pt, and 17 pt, respectively. Its illustrative bar proportions
+  are preserved by the uniform enlargement.
+- Right-column revision: use Attention in Closed Form (4.80 inches),
+  Conclusion (9.20 inches), Scope (4.70 inches), and References &
+  Acknowledgments (5.26 inches), separated by 0.28-inch gaps. The formula
+  card uses the same white background and neutral border as the other section
+  cards, with a 36 pt equation. The two main
+  conclusions use 34 pt type with selective bold emphasis. A plain 26 pt
+  paragraph contrasts observed accuracy with predicted eventual failure for
+  Learned log (50), without a separate heading or comparison boxes. Scope
+  uses ordinary 26 pt body text; references and
+  acknowledgments use 23 pt with 28 pt leading. Redistribute 1.20 inches
+  from Conclusion to Scope (0.50 inches) and References & Acknowledgments
+  (0.70 inches). All three regions retain the same lower edge.
+- The main figure is now 19.20 inches wide. Its data, annotations, and vector
+  asset are unchanged; only its displayed size increases with the wider
+  center region.
 
 Sections intentionally omitted or combined:
 
@@ -142,8 +207,9 @@ Sections intentionally omitted or combined:
   attention tutorial.
 - Do not create a separate Experimental Design section; retain only the facts
   needed to interpret the figures in the Results metadata line and captions.
-- Combine Conclusion and Takeaways into one block.
-- Include the scope limitation as one sentence rather than a separate section.
+- Present the takeaways under Conclusion, without a separate Key Takeaways card.
+- Give Scope its own compact card with two sentences rather than a list of
+  detailed limitations.
 - Do not create separate Related Work or Use of Artificial Intelligence
   sections unless an external requirement makes them necessary.
 
@@ -164,23 +230,26 @@ caption:
 > Means over five seeds; bands show $\pm1$ s.d.
 
 The task definition and model schematic already establish the balanced binary
-target-detection setting. Epoch budgets appear on the learned-log threshold
-plot. Do not add the optimizer, learning rate, batch size, number of training
+target-detection setting. Run labels retain the epoch budgets in parentheses.
+Do not add the optimizer, learning rate, batch size, number of training
 examples, initialization, or chunked-evaluation details to the poster.
 
 ## Lower-Right References and Acknowledgments
 
 ### References
 
-> **[1]** Vaswani et al. (2017). *Attention Is All You Need.* NeurIPS.  
-> **[2]** Press et al. (2022). *Train Short, Test Long: Attention with Linear
+> **[1]** Press et al. (2022). *Train Short, Test Long: Attention with Linear
 > Biases Enables Input Length Extrapolation.* ICLR.
+>
+> **[2]** Vaswani et al. (2017). *Attention Is All You Need.* NeurIPS.
 
 Citation placement:
 
-- Place **[2]** after the first Motivation sentence about performance beyond
+- Number references in order of first appearance in the poster's reading flow.
+- Place **[1]** after the first Motivation sentence about performance beyond
   the training length.
-- Place **[1]** after the reference to standard softmax attention in Section 1.
+- Place **[2]** after standard softmax in the upper-right Attention in Closed
+  Form card.
 
 ### Acknowledgments
 
@@ -191,6 +260,7 @@ Citation placement:
 
 - Place References and Acknowledgments below the Scope statement in the
   lower-right corner.
+- Use a 5.26-inch-high card with 23 pt text and 28 pt leading.
 - Keep the two references readable rather than compressing them into footnote
   text.
 - Do not include a QR code or a separate Related Work block.
@@ -212,37 +282,36 @@ growing-competition mechanism without introducing technical notation.
 #### Motivation
 
 > Training on short sequences does not guarantee reliable performance on much
-> longer inputs [2]. As sequence length grows, the target must compete with more
-> non-target tokens for the same attention budget.
-
-#### Research Question
-
-> **How must attention sharpen with length to remain concentrated on the
-> target?**
+> longer inputs [1]. As sequence length grows, more non-target tokens compete
+> for the same attention budget. We ask how attention must sharpen with length
+> to remain concentrated on the target.
 
 ### Visual Specification
 
-- Keep the motivation as two short sentences rather than a paragraph.
-- Give the research question a distinct background or border so that it is the
-  first text read within the left column.
+- Keep all three sentences in one continuous paragraph, with no forced line
+  break before the research question and no separate question box or heading.
+- Match the final sentence to the ordinary body text in color, weight, and
+  size; do not emphasize it separately.
 - Do not introduce score-scaling notation here; Section 2 will connect
   attention sharpening to $\alpha(n)$.
 - Place this block immediately above Section 1 so that the phrase "same
-  attention budget" leads into the fixed-attention dilution visual.
+  attention budget" leads into the task setup and attention-dilution visual.
 
 ### Status
 
 - Copy: confirmed
-- Visual treatment: merged with the research question into one opening card;
-  the question keeps its highlighted box and no separate Research Question
-  heading is used
+- Visual treatment: the research question continues the same paragraph in
+  ordinary body styling, with no separate box or Research Question heading
 
-## Section 1: Why Fixed Attention Dilutes with Length
+## Section 1: Task & Setup and Why Attention Dilutes
 
 ### Purpose
 
-Introduce the target-detection task and establish why a fixed target advantage
-is insufficient as the number of non-target competitors grows.
+Introduce the target-detection task and identify the reduced model, then
+establish why a fixed target advantage is insufficient as the number of
+non-target competitors grows. Put the task and model in a Task & Setup card,
+followed by a separate Why Attention Dilutes card for the visual and intuitive
+explanation. The equation is in the upper-right Attention in Closed Form card.
 
 ### Intended Takeaway
 
@@ -253,14 +322,40 @@ to preserve the target's share of attention as sequence length increases.
 
 #### Heading
 
-> **Why Fixed Attention Dilutes with Length**
+> **Task & Setup**
 
-#### Task Definition
+#### Task
 
-> The model detects whether a designated target token is present in the
-> sequence.
+Begin directly with the task statement; do not repeat Task as a visible
+subheading beneath the card title.
 
-#### Main Explanation
+> Detect whether a target token (**T**) is present. All other tokens are
+> identical non-targets (**N**).
+
+Render the two examples as compact token diagrams using navy for T and gray
+for N, with an arrow to the binary label:
+
+```text
+T N N ... N  ->  Target present
+N N N ... N  ->  Target absent
+```
+
+#### Model
+
+This label organizes the plan only; render the model sentence as an ordinary
+paragraph below the examples, without a visible subheading.
+
+> We use a reduced attention-based binary classifier with one
+> readout query, fixed one-hot token values, and a linear output layer.
+
+This sentence identifies the model without duplicating the central Method
+schematic. Do not add a parameter-count table or describe the architecture as
+a one-layer Transformer.
+
+#### Why Attention Dilutes
+
+Use this as a standalone card heading, followed by the fixed-score-advantage
+explanation in ordinary type, then the existing short/long attention schematic.
 
 The former prose sentence ("The target retains an advantage over every
 individual non-target, but the non-targets grow in number and dominate in
@@ -272,9 +367,9 @@ non-target. The growing collection of small non-target bars and the shrinking
 target segment in the share bar show the aggregate loss. The long token row
 uses an ellipsis but keeps the final non-target visible because the query comes
 from that last position. The short scene uses the actual training length
-$n=10$ and an illustrative target share of about 60%; the long scene uses the
-same target-to-non-target ratio and a target share of about 22%. The only
-remaining prose claim is the equation-takeaway box. All per-token bars use one
+$n=10$ and an illustrative target share of 75%; the long scene uses the
+same fixed-score setting and a target share of about 22%. The only
+remaining prose claim is the short explanation above the visual. All per-token bars use one
 qualitative display scale rather than encoding exact numeric proportions. The
 non-target bars are deliberately enlarged and use a darker neutral fill so that
 their small weights remain visible in print.
@@ -282,62 +377,50 @@ their small weights remain visible in print.
 #### Visual Labels
 
 - Short sequence ($n=10$) / Long sequence
-- attention per token
+- Attention weight per token
 - many small weights add up (brace over the long scene's non-target bars)
-- target's share of attention / all non-targets combined (on the share bars)
+- target's share of attention / non-targets (short share bar)
+- target / all non-targets combined (long share bar)
 - (schematic)
 
-### Formal Statement
+Keep the short share bar's total width unchanged, allocating 75% to the target
+and 25% to non-targets. Center each label within its segment. Do not print
+these illustrative percentages or change the per-token bars or long scene.
 
-Let $p_t(n)$ denote the share of attention assigned to the target token in a
-length-$n$ sequence. With one target score $a$ and $n-1$ identical non-target
-scores $b$, standard softmax attention [1] reduces on the poster to the single
-display
+### Introductory Explanation
 
-```math
-p_t(n)
-=
-\frac{e^\Delta}{e^\Delta+(n-1)}
-\;\longrightarrow\;
-0
-\quad\text{as } n\to\infty,
-\qquad
-\Delta=a-b>0.
-```
+> A fixed score advantage over each non-target cannot prevent the target's
+> share of attention from shrinking as the sequence grows.
 
-The equivalent reciprocal form $1/[1+(n-1)e^{-\Delta}]$ and the prose
-conclusion are omitted. The numerator-and-denominator form maps the single
-target weight and the growing non-target crowd directly onto the schematic;
-the limit is folded into the display and the words are carried by the
-equation-takeaway box.
-
-Equation takeaway:
-
-> A fixed score margin separates the target from each non-target individually,
-> but cannot offset their growing aggregate weight.
-
-This expression should be presented as the closed form obtained by applying
-standard softmax attention to the reduced two-score setting, not as a modified
-attention rule.
+The bars represent normalized attention weights, not raw scores or their
+exponentials. The left card retains only the plain-language phrase "score
+advantage." Define $a$, $b$, and $\Delta=a-b$ in the central scaling
+explanation; show the equation in the upper-right card.
 
 ### Visual Specification
 
-- Use a horizontal short-sequence versus long-sequence comparison.
+- Stack the short-sequence and long-sequence scenes vertically below the
+  Why Attention Dilutes card heading and introductory explanation.
 - Represent the target with one accent color and the non-targets in neutral
   gray.
-- Keep the target-to-non-target per-token attention ratio unchanged in both
-  scenes, while shrinking all individual normalized weights in the long scene.
+- Keep the target taller than each individual non-target in both scenes,
+  while shrinking all individual normalized weights in the long scene.
   Only the number and combined attention of the non-targets should increase.
 - Visually distinguish an individual non-target from the combined non-target
   weight, for example with a bracket or a grouped background shape.
 - Keep score notation in the formal statement rather than labeling the
   normalized attention bars with $a$ and $b$.
-- Place the formal statement in a visually separate box so that the intuitive
-  reading path does not require the equation.
+- Set the fixed-score-advantage explanation in regular 24 pt type above the
+  schematic, without a box or left rule. Keep this card equation-free so that
+  the intuitive reading path does not require mathematical notation.
+- Use the freed space to separate the short/long scenes and slightly enlarge
+  the schematic and its labels, without changing the illustrative proportions.
 - If illustrative numerical weights are used, label them as schematic rather
   than experimental measurements.
-- Do not include query/key notation, model architecture details, scaling modes,
-  or experimental curves in this section.
+- Limit the model introduction to one ordinary paragraph below the task
+  examples, without a separate Model subheading. Leave the
+  query/key notation, detailed model pathway, scaling modes, and experimental
+  curves to the central Method and Results cards.
 
 ### Transition to Section 2
 
@@ -346,8 +429,13 @@ it, and the Section 2 heading answers it.
 
 ### Status
 
-- Copy: reduced to the task sentence plus the two boxed statements
-- Formal statement: single-form display with the limit folded in
+- Copy: task definition, two compact labeled examples, one model sentence,
+  and the intuitive explanation above the dilution schematic
+- Card structure: Task & Setup and Why Attention Dilutes are separate cards;
+  the schematic is slightly enlarged, and the introductory explanation uses
+  regular type without a box
+- Formal statement: moved to the upper-right card and generalized to include
+  $\alpha(n)$; score notation is defined in the central Method card
 - Visual: refined draft; each scene stacks normalized per-token attention bars,
   the token row, and a share bar, with an ellipsis in the long sequence and a
   navy target throughout
@@ -479,11 +567,16 @@ quickly this effective margin grows relative to the non-target competition.
 
 #### Main Explanation
 
-> Before softmax, every score is multiplied by a positive factor $\alpha(n)$:
-> the ranking is unchanged, but the effective score margin grows from $\Delta$
-> to $\alpha(n)\Delta$.
+> Learned query and key vectors produce the pre-softmax scores $a$ (target) and
+> $b$ (non-target) through scaled dot products. Their difference is the score
+> margin $\Delta=a-b$. Multiplying every score by a positive factor $\alpha(n)$
+> preserves the score ranking and changes this margin to $\alpha(n)\Delta$.
 
 ### Scaling Modes
+
+Shared note above the three mode cards:
+
+> Attention limits as sequence length $n\to\infty$
 
 #### Constant
 
@@ -552,6 +645,8 @@ Optional technical note:
   across the middle two columns.
 - Give each mode one formula, one plain-language description, and one
   long-length outcome.
+- Add a single centered 21 pt note above the three cards to identify the
+  displayed limits as sequence-length limits, rather than training limits.
 - Fix each mode title to the top of its card, then vertically center the
   formula--description--outcome group in a separate fixed-height region below
   it.
@@ -566,7 +661,7 @@ Optional technical note:
 
 ### Transition to Section 3
 
-> **Same training-length accuracy. Sharply different long-length behavior.**
+> **Same training-length accuracy. Different long-length behavior.**
 
 ### Status
 
@@ -580,16 +675,17 @@ Optional technical note:
 ### Purpose
 
 Use the experimental measurements to verify the distinct long-length regimes
-predicted in Sections 1 and 2. The main figure should show how target attention
-diverges beyond the training length, while the smaller threshold figure should
-show why finite benchmark accuracy does not identify the asymptotic regime.
+predicted in Sections 1 and 2. The main figure shows how target attention
+diverges beyond the training length. The final Conclusion paragraph explains why
+finite benchmark accuracy does not establish long-length behavior.
 
 ### Intended Takeaways
 
 1. Runs that fit the same short training length can develop sharply different
    target attention as sequence length increases.
-2. The learned-log checkpoints can all pass the finite benchmark even though
-   only the later checkpoints cross the theoretical growth threshold.
+2. Learned log (50) passes the finite benchmark even though its learned
+   parameters imply eventual failure; Learned log (200) lies above the
+   theoretical growth threshold.
 
 ### Section Heading
 
@@ -631,7 +727,7 @@ because they repeat these regimes without adding a new comparison.
   width.
 - Distinguish curves with marker shape and line style as well as color.
 - Do not extend the curves beyond the evaluated range; theoretical predictions
-  belong in the threshold figure and callouts.
+  belong in the final Conclusion paragraph, explicitly identified as theoretical.
 
 Recommended visual identities:
 
@@ -666,47 +762,21 @@ raw learned score margin") is dropped.
 The evaluated range is not repeated here; the Results metadata line already
 states it.
 
-### Figure B: Learned-Log Threshold Crossing
+### Omitted Learned-Log Threshold Plot
 
-#### Figure Title
-
-The figure carries no internal title; the right-column card heading
-(Learned-Log Threshold) delivers it.
-
-#### Axes and Marks
-
-- Horizontal axis: training checkpoints at 50, 100, 200, and 400 epochs
-- Vertical axis: learned growth rate $c\Delta$
-- Plot means with $\pm1$ s.d. error bars over five seeds.
-- Label the four mean values: 0.58, 0.83, 1.14, and 1.55.
-- Draw a prominent horizontal threshold at $c\Delta=1$.
-- Connect the ordered checkpoints with a thin line, but refer to them as
-  checkpoints rather than converged solutions.
-
-#### Figure B Callout
-
-The factual half lives inside the figure: the annotation "every checkpoint
-reaches 100% accuracy at $n=10^7$" sits in the below-threshold band. The
-callout box below the caption keeps only the interpretation:
-
-> **A Finite Pass Can Hide Later Failure.** Checkpoints below $c\Delta=1$ pass
-> the $n=10^7$ benchmark yet are predicted to fail at greater lengths.
-
-#### Figure B Caption
-
-> Means over five seeds; error bars show $\pm1$ s.d.
-
-The crossing between the 100- and 200-epoch checkpoints is not restated in
-prose; the labeled values and the threshold line show it.
+The threshold plot is no longer displayed on the poster. The main figure's
+legend retains the learned growth rates for the two representative learned-log
+runs. Its former finite-benchmark message moves into a plain paragraph in
+Conclusion that distinguishes observation from prediction. Keep the existing threshold figure assets available;
+removing the section does not require deleting or regenerating those files.
 
 ### Placement
 
 - Place Figure A across the middle two columns as the largest visual on the
   poster.
-- Place Figure B in the upper portion of the right column.
 - The Figure A callout lives inside the plot as an annotation.
-- Place the Figure B callout directly below the threshold plot so that it leads
-  into the Key Takeaways block.
+- Put Attention in Closed Form at the upper right, followed by Conclusion,
+  Scope, and References & Acknowledgments at the lower-right corner.
 
 ### Excluded Result Details
 
@@ -717,68 +787,146 @@ prose; the labeled values and the threshold line show it.
 - Classifier threshold $p^{\ast}$
 - Predicted failure-length equation
 - Extrapolated curves beyond $10^7$
+- The separate learned-log threshold plot across training budgets
 
 These details remain available in the full report and should not compete with
 the two poster claims.
 
 ### Status
 
-- Figure selection: confirmed
-- Callout copy: compressed; the factual halves live inside the figures
-- Figure generation: second draft (no internal titles, in-plot annotations,
-  taller main figure)
+- Figure selection: the main target-attention figure only
+- Callout copy: the margin comparison remains inside the main figure; the
+  finite-pass caution appears as a plain paragraph in Conclusion
+- Figure assets: unchanged; the main figure is displayed at 19.20 inches wide
+  and the threshold plot is no longer embedded
 
 Generated assets:
 
 - `figures/poster_target_attention_by_length.pdf` and PNG preview
-- `figures/poster_learned_log_threshold.pdf` and PNG preview
+- `figures/poster_learned_log_threshold.pdf` and PNG preview (retained, not used)
 - Generation script: `../../src/make_poster_figures.py`
 
-## Key Takeaways and Scope
+## Attention in Closed Form
 
 ### Purpose
 
-Answer the research question with two concise conclusions, then state the
-boundary of the claim without repeating the finite-benchmark callout from the
-Results section.
+Provide an optional mathematical summary after the reader encounters the
+model, scaling modes, and main result. Use one equation that includes all
+three modes, rather than placing the constant-scaling special case beside
+the introductory dilution schematic.
 
 ### Poster Copy
 
-#### Takeaway 1
+> Standard softmax [2] gives the target's attention share in a positive
+> sequence of length $n$:
 
-> **Fixed scaling postpones, but cannot prevent, target-attention dilution.**
+```math
+p_t(n)=\frac{e^{\alpha(n)a}}
+{e^{\alpha(n)a}+(n-1)e^{\alpha(n)b}}.
+```
 
-The former supporting sentence duplicated the Section 1 insight box and is
-dropped; the bold lead stands alone.
-
-#### Takeaway 2
-
-> **Sufficiently strong logarithmic sharpening can prevent dilution.** Target
-> attention converges to one when $\Delta>1$ (Log) or $c\Delta>1$ (Learned
-> log).
-
-#### Scope
-
-> **These thresholds are exact for the reduced two-score classifier studied
-> here; whether analogous conditions hold in full transformers remains open.**
+The central Method paragraph defines $a$ as the target's pre-softmax score,
+$b$ as each non-target's score, and $\Delta=a-b$ as their margin. A positive
+sequence has one target and $n-1$ identical non-targets, so the denominator
+adds the target's unnormalized weight and the aggregate non-target weight.
+The equation is standard softmax applied to the scaled scores in this model,
+not a different attention rule. It is valid without assuming $a>b$; the
+constant-scaling illustration on the left depicts a fixed positive advantage.
 
 ### Visual Specification
 
-- Place this block below the Figure B callout in the right column.
-- Use two numbered takeaways rather than a paragraph or a separate Conclusion
-  section.
-- Set the bold lead sentences large; only Takeaway 2 carries a smaller
-  supporting line.
-- Keep the threshold conditions on the supporting line so that a general reader
-  can understand the claim without reading the notation.
-- Separate the Scope statement with a light rule or subtle background, but do
-  not reduce it to footnote-sized text.
-- Do not repeat **A Finite Pass Can Hide Later Failure** here; the Results
-  callout already delivers that supporting message.
-- Do not add a limitations list or future-work bullets.
+- Place this 4.80-inch-high card at the top of the right column.
+- Use the standard white background and neutral gray border shared by the
+  other section cards, without a nested box.
+- Set the equation at 36 pt, substantially larger than the former 21 pt
+  left-column version. Use 24 pt for the explanatory sentence. Omit the
+  constant-scaling note because the central mode card already defines it.
+- Do not add an equivalent reciprocal or margin-based formula, repeat the
+  asymptotic criterion, or repeat the mode-specific thresholds here.
+- Keep the central Method card's scaling conditions and the main result
+  figure unchanged.
 
 ### Status
 
-- Takeaway copy: confirmed; Takeaway 1 support line dropped on the poster
-- Scope copy: confirmed
-- Visual: refined draft complete
+- Formula: includes the length-dependent multiplier for all three modes
+- Placement: upper-right card; removed from the left-column schematic
+- Reading layers: intuitive explanation on the left, notation and scaling
+  in the center, optional large equation on the right
+
+## Conclusion
+
+### Purpose
+
+Answer the research question with two prominent conclusions and preserve the
+finite-benchmark caution after removing the threshold plot. Do not repeat the
+central scaling formulas or add new result claims.
+
+### Poster Copy
+
+#### Main Conclusion 1
+
+> Even a large score advantage **cannot prevent attention dilution** under
+> constant scaling.
+
+#### Main Conclusion 2
+
+> **Sufficiently strong logarithmic scaling** makes the target receive nearly
+> all attention as sequences grow.
+
+#### Supporting Paragraph
+
+> Finite success can still hide later failure. Learned log (50) reaches 100%
+> accuracy at ten million tokens, yet the theory predicts eventual failure.
+
+The observed accuracy is a measured result. The eventual failure is a
+closed-form prediction, not an experiment beyond the evaluated range. Do not
+imply that the downward attention curve alone proves eventual classification
+failure.
+
+### Visual Specification
+
+- Use one 9.20-inch-high Conclusion card below Attention in Closed Form.
+- Set the two bulleted conclusions in 34 pt type with 41 pt leading and
+  selective bold emphasis, not all-bold paragraphs.
+- Keep the first conclusion close to the heading; distribute the remaining
+  space between the two main conclusions and the supporting paragraph.
+- Set the closing paragraph in ordinary 26 pt body text with 31 pt leading.
+  Remove its separate heading, run label, colored boxes, and all-bold styling.
+  Keep the observation and theoretical prediction explicit within the prose.
+- Do not repeat $\Delta>1$ or $c\Delta>1$ here; both are already visible in the
+  central Method card.
+
+### Status
+
+- Copy: confirmed
+- Visual: two prominent conclusions followed by one ordinary closing paragraph
+- Threshold plot: removed from the poster, with its central caution retained
+
+## Scope
+
+### Purpose
+
+State where the exact conclusions apply without adding a detailed caveat list
+or implying that the reduced model establishes a result for full transformers.
+
+### Poster Copy
+
+> The exact analysis applies to a reduced classifier with one target per positive
+> sequence, identical non-targets, and fixed one-hot values.
+>
+> Whether the same scaling conditions extend to full transformers remains open.
+
+### Visual Specification
+
+- Place Scope in a separate 4.70-inch-high card below Conclusion.
+- Use ordinary 26 pt body text. Separate the setting and transfer-boundary
+  sentences with a 0.32-inch additional paragraph gap, leaving more bottom
+  padding within the enlarged card.
+- Keep optimizer, identifiability, and convergence caveats in the report.
+- Retain References & Acknowledgments below this card; there is enough room
+  to keep the acknowledgment.
+
+### Status
+
+- Copy: confirmed
+- Visual: standalone Scope card, with References & Acknowledgments retained
