@@ -41,8 +41,10 @@ Copy-Item configs/stage1_transformer.example.yaml configs/local/stage1_transform
 ```
 
 Local configs under `configs/local/` are ignored by git, except for `.gitkeep`.
-Config precedence is: dataclass defaults, then YAML values, then explicit CLI arguments.
-YAML files have `task` and `stage` sections.
+For the Stage 0/1/2A configuration workflow described below, config precedence is:
+dataclass defaults, then YAML values, then explicit CLI arguments.
+These YAML files have `task` and `stage` sections. Stage 3 uses CLI arguments only;
+its saved `config.json` records a run and is not a `--config` input.
 
 Key config fields:
 
@@ -56,6 +58,23 @@ Key config fields:
 ```powershell
 python -m unittest discover -s tests
 ```
+
+## Binary Detection: Stage 3 and Training-Length Follow-up
+
+Start with the [detection guide](documents/training_length/DETECTION_GUIDE.md) for
+the reduced binary classifier, then the [baseline reproduction record](documents/training_length/BASELINE_REPRODUCTION.md)
+for saved report results and verified short commands. The [follow-up plan](documents/training_length/PLAN.md)
+lists candidate training-length comparisons and decisions still needed before a sweep.
+
+After the environment setup above, inspect the actual Stage 3 CLI:
+
+```powershell
+python -m stage3_simplified_attention --help
+```
+
+An argument-free Stage 3 run starts 200 epochs and evaluation up to 10M tokens.
+Use the bounded smoke commands in the reproduction record for a short pipeline check.
+The YAML and shared flags in the Stage 0/1/2A sections below do not all apply to Stage 3.
 
 ## Stage 0: Max-Pooling Baseline
 
