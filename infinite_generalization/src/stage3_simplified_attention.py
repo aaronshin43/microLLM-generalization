@@ -9,7 +9,7 @@ import math
 import random
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import torch
 from torch import nn
@@ -951,10 +951,15 @@ def run_loaders_once(
     optimizer: torch.optim.Optimizer | None = None,
     max_steps: int | None = None,
     batch_shuffle_seed: int | None = None,
+    training_observer: Callable[
+        [SimplifiedLastQueryAttentionClassifier, torch.Tensor | None, torch.Tensor | None], None
+    ] | None = None,
 ) -> tuple[float, dict[str, float], int]:
     """Run one pass over length-specific loaders.
 
     Returns the loss, accuracy metrics, and number of optimizer updates performed.
+    A passive observer can inspect completed training updates; it must not mutate
+    model state or consume RNG if identical training behavior is required.
     """
 
     is_training = optimizer is not None
@@ -993,6 +998,9 @@ def run_loaders_once(
         total_examples += batch_size
         all_logits.append(logits.detach().cpu())
         all_labels.append(labels.detach().cpu())
+
+        if is_training and training_observer is not None:
+            training_observer(model, tokens.detach(), labels.detach())
 
     if total_examples == 0:
         return float("nan"), {"accuracy": float("nan"), "positive_accuracy": float("nan"), "negative_accuracy": float("nan")}, update_count
@@ -1693,8 +1701,16 @@ def train_model(
     *,
     device: torch.device,
     output_dir: Path,
+    training_observer: Callable[
+        [SimplifiedLastQueryAttentionClassifier, torch.Tensor | None, torch.Tensor | None], None
+    ] | None = None,
 ) -> tuple[SimplifiedLastQueryAttentionClassifier, int]:
-    """Train the simplified attention model."""
+    """Train the model, optionally observing initialization and completed updates.
+
+    The observer receives (model, None, None) at initialization, then the model,
+    detached tokens and labels after each optimizer update. Validation does not
+    notify the observer. Omitting it preserves the original training path.
+    """
 
     train_lengths = resolved_train_lengths(config)
     train_loaders = make_multilength_loaders(
@@ -1727,6 +1743,9 @@ def train_model(
         target_token_count=config.target_token_count,
         non_target_token_count=config.non_target_token_count,
     ).to(device)
+    if training_observer is not None:
+        # Observe initialization and completed updates without changing the default path.
+        training_observer(model, None, None)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -1757,6 +1776,7 @@ def train_model(
             optimizer=optimizer,
             max_steps=remaining_steps,
             batch_shuffle_seed=config.seed + 20_000 + epoch,
+            training_observer=training_observer,
         )
         optimizer_updates += updates_this_epoch
         val_loss, val_metrics, _ = run_loaders_once(

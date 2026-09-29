@@ -66,6 +66,14 @@ the reduced binary classifier, then the [baseline reproduction record](documents
 for saved report results and verified short commands. The [follow-up plan](documents/training_length/PLAN.md)
 lists candidate training-length comparisons and decisions still needed before a sweep.
 
+The first 27-run pilot is recorded in its [launch specification](documents/training_length/PILOT_SPEC.md)
+and [results](documents/training_length/PILOT_RESULTS.md), including paired seeds,
+realized sequence/token exposure and explicitly labeled analytical predictions.
+
+The learned-log [6400-update confirmation](documents/training_length/CONFIRMATION_6400_RESULTS.md)
+adds fresh-restart verification at 1600 updates, threshold-entry times, failure-rank
+trajectories and loss-matched parameter comparisons for the same three conditions.
+
 After the environment setup above, inspect the actual Stage 3 CLI:
 
 ```powershell

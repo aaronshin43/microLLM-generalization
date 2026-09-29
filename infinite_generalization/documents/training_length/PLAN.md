@@ -115,3 +115,27 @@ Completed preparation: report artifacts mapped for all 40 runs; current model/lo
 Remaining blockers for exact historical reproduction are missing historical revision/environment and missing checkpoints in the older `stage3base` family. Local report-family checkpoints do exist. There is no blocking implementation issue identified for the scoped two-token follow-up; trajectory diagnostics and fair sequence/token accounting require an explicit specification before launch.
 
 Possible later cleanup: portable report figure paths, checkpoint-driven mechanism figure generation, generalizing analyzer length selection, historical artifact archiving, input-validation coverage, and optional intermediate diagnostics. Keep these separate from the current documentation cleanup and from changes that would affect RNG order, architecture or training behavior. Stage 4A/4B reuse Stage 3 model/helpers, so future shared code changes should include their relevant regression tests.
+
+## Pilot execution record (2026-09-28)
+
+Following the user's execution request and selected 60-minute cap, the recommended
+pilot settings were finalized in [PILOT_SPEC.md](PILOT_SPEC.md). All 27 runs
+completed at 1600 updates, using 2048 balanced examples per length, three paired
+seeds and all three scaling modes. Diagnostics were recorded initially and every
+200 updates. Explicit evaluation stopped at length 10000; no 10M sequence was run.
+
+See [PILOT_RESULTS.md](PILOT_RESULTS.md) for all conditions and seeds, actual exposure,
+trajectories, paired comparisons and limitations. The 6400-update confirmation and
+length-1000 training remain deferred until this pilot is reviewed. The earlier
+"pending" descriptions above preserve the pre-launch planning history; the launch
+specification records the settings actually used.
+
+## 6400-update confirmation record (2026-09-28)
+
+The user authorized learned-log only, the same three training conditions and seeds,
+6400 updates from fresh initialization, with the existing 200-update diagnostics.
+All nine runs completed. Every 1600-update prefix matched the original pilot's
+weights, diagnostics and history exactly. See [launch specification](CONFIRMATION_6400_SPEC.md)
+and [confirmation results](CONFIRMATION_6400_RESULTS.md) for threshold-entry brackets,
+parameter selection, changing failure-length ranks and progress-matched comparisons.
+Length-1000 training and task changes remain outside this experiment.
