@@ -139,3 +139,21 @@ weights, diagnostics and history exactly. See [launch specification](CONFIRMATIO
 and [confirmation results](CONFIRMATION_6400_RESULTS.md) for threshold-entry brackets,
 parameter selection, changing failure-length ranks and progress-matched comparisons.
 Length-1000 training and task changes remain outside this experiment.
+
+## Parameter-selection mechanism follow-up (planned 2026-09-29)
+
+The next scoped sequence is five new-seed replications, an intervention on the
+learned-log coefficient initialization for the two single lengths, and a trace
+of gradients plus realized AdamW updates. The fixed comparisons, decision gates,
+measurements and execution budget are in [MECHANISM_FOLLOWUP_PLAN.md](MECHANISM_FOLLOWUP_PLAN.md).
+This section records a plan; it does not indicate that these runs have started.
+
+## Parameter-selection follow-up execution (2026-09-29)
+
+The planned five-seed replication, coefficient-initialization intervention and
+fresh realized-update traces completed within the provisional time ceiling.
+See [MECHANISM_FOLLOWUP_RESULTS.md](MECHANISM_FOLLOWUP_RESULTS.md) for the full
+seed-level outcomes, fitted-versus-failed distinction, analytical prediction
+limits and verified update decomposition. The original initialization's exponent
+ordering replicated; the $c_0=1.0$ intervention exposed a failed optimization
+branch for one seed. No matched-initial-effective-margin control was run.

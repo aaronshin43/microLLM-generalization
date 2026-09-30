@@ -954,6 +954,7 @@ def run_loaders_once(
     training_observer: Callable[
         [SimplifiedLastQueryAttentionClassifier, torch.Tensor | None, torch.Tensor | None], None
     ] | None = None,
+    update_observer: object | None = None,
 ) -> tuple[float, dict[str, float], int]:
     """Run one pass over length-specific loaders.
 
@@ -990,7 +991,11 @@ def run_loaders_once(
         if is_training:
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            if update_observer is not None:
+                update_observer.before_step(model, tokens, labels, loss, optimizer)
             optimizer.step()
+            if update_observer is not None:
+                update_observer.after_step(model, tokens, labels, loss, optimizer)
             update_count += 1
 
         batch_size = labels.shape[0]
@@ -1704,6 +1709,7 @@ def train_model(
     training_observer: Callable[
         [SimplifiedLastQueryAttentionClassifier, torch.Tensor | None, torch.Tensor | None], None
     ] | None = None,
+    update_observer: object | None = None,
 ) -> tuple[SimplifiedLastQueryAttentionClassifier, int]:
     """Train the model, optionally observing initialization and completed updates.
 
@@ -1777,6 +1783,7 @@ def train_model(
             max_steps=remaining_steps,
             batch_shuffle_seed=config.seed + 20_000 + epoch,
             training_observer=training_observer,
+            update_observer=update_observer,
         )
         optimizer_updates += updates_this_epoch
         val_loss, val_metrics, _ = run_loaders_once(

@@ -73,6 +73,8 @@ realized sequence/token exposure and explicitly labeled analytical predictions.
 The learned-log [6400-update confirmation](documents/training_length/CONFIRMATION_6400_RESULTS.md)
 adds fresh-restart verification at 1600 updates, threshold-entry times, failure-rank
 trajectories and loss-matched parameter comparisons for the same three conditions.
+The [parameter-selection follow-up](documents/training_length/MECHANISM_FOLLOWUP_RESULTS.md)
+tests five new seeds, coefficient initialization and realized AdamW updates.
 
 After the environment setup above, inspect the actual Stage 3 CLI:
 
