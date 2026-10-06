@@ -75,6 +75,11 @@ adds fresh-restart verification at 1600 updates, threshold-entry times, failure-
 trajectories and loss-matched parameter comparisons for the same three conditions.
 The [parameter-selection follow-up](documents/training_length/MECHANISM_FOLLOWUP_RESULTS.md)
 tests five new seeds, coefficient initialization and realized AdamW updates.
+The [matched-initial-behavior control](documents/training_length/MATCHED_INITIAL_BEHAVIOR_RESULTS.md)
+holds initial attention/logits/loss fixed at a declared reference while changing
+the coefficient, then tests query/key factorization of the same initial scoring
+function. Its [launch specification](documents/training_length/MATCHED_INITIAL_BEHAVIOR_SPEC.md)
+records the 30 main controls, 12 conditional controls and two exact baseline replays.
 
 After the environment setup above, inspect the actual Stage 3 CLI:
 

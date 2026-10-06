@@ -157,3 +157,24 @@ seed-level outcomes, fitted-versus-failed distinction, analytical prediction
 limits and verified update decomposition. The original initialization's exponent
 ordering replicated; the $c_0=1.0$ intervention exposed a failed optimization
 branch for one seed. No matched-initial-effective-margin control was run.
+
+## Initial-behavior-matched control (planned 2026-10-03)
+
+The next proposed control varies the initial learned-log coefficient while
+scaling query/key to preserve baseline effective margin, attention and logits
+at a declared reference length. [MATCHED_INITIAL_BEHAVIOR_PLAN.md](MATCHED_INITIAL_BEHAVIOR_PLAN.md)
+specifies a common length-100 reference, a length-10 training-behavior companion,
+the changed parameterization, validation and a conditional factorization check.
+This section preserves the pre-launch plan; completed controls are recorded below.
+
+## Initial-behavior-matched control execution (2026-10-04)
+
+All 30 main controls, 12 conditional query/key factorization controls and two
+baseline verification replays completed at 6400 updates in 26.4 minutes.
+Initial reference behavior matched within the declared tolerance, and baseline
+weights/history/diagnostics reproduced exactly. Matching did not remove
+coefficient-sensitive fitting or parameter selection; the factorization check
+changed updates but retained the seed-level fitting outcomes. See the
+[launch specification](MATCHED_INITIAL_BEHAVIOR_SPEC.md) and
+[results](MATCHED_INITIAL_BEHAVIOR_RESULTS.md) for all seeds, references,
+loss-matched comparisons and limitations.

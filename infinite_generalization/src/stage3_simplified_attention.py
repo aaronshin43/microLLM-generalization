@@ -1710,12 +1710,14 @@ def train_model(
         [SimplifiedLastQueryAttentionClassifier, torch.Tensor | None, torch.Tensor | None], None
     ] | None = None,
     update_observer: object | None = None,
+    initial_state_transform: Callable[[SimplifiedLastQueryAttentionClassifier], None] | None = None,
 ) -> tuple[SimplifiedLastQueryAttentionClassifier, int]:
     """Train the model, optionally observing initialization and completed updates.
 
     The observer receives (model, None, None) at initialization, then the model,
     detached tokens and labels after each optimizer update. Validation does not
     notify the observer. Omitting it preserves the original training path.
+    An explicit transform runs before the initial observation and optimizer creation.
     """
 
     train_lengths = resolved_train_lengths(config)
@@ -1749,6 +1751,8 @@ def train_model(
         target_token_count=config.target_token_count,
         non_target_token_count=config.non_target_token_count,
     ).to(device)
+    if initial_state_transform is not None:
+        initial_state_transform(model)
     if training_observer is not None:
         # Observe initialization and completed updates without changing the default path.
         training_observer(model, None, None)

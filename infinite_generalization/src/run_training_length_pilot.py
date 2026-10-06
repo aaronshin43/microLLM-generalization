@@ -159,14 +159,16 @@ class TrainingRecorder:
             })
 
 
-def run_one(config, output, device, interval, reference_run=None, verify_step=1600, update_observer=None):
+def run_one(config, output, device, interval, reference_run=None, verify_step=1600,
+            update_observer=None, initial_state_transform=None):
     output.mkdir()
     write_json(output / "config.json", {**asdict(config), "resolved_device": str(device)})
     set_reproducibility(config.seed)
     recorder = TrainingRecorder(config, output, interval, reference_run, verify_step)
     started = time.perf_counter()
     model, updates = train_model(config, device=device, output_dir=output,
-                                training_observer=recorder, update_observer=update_observer)
+                                training_observer=recorder, update_observer=update_observer,
+                                initial_state_transform=initial_state_transform)
     assert updates == recorder.updates == config.max_train_steps
     assert sum(entry["sequences"] for entry in recorder.exposure.values()) == updates * config.batch_size
     save_model_checkpoint(output / "model.pt", model=model, config=config, optimizer_updates=updates)
