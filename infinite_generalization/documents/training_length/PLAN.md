@@ -178,3 +178,16 @@ changed updates but retained the seed-level fitting outcomes. See the
 [launch specification](MATCHED_INITIAL_BEHAVIOR_SPEC.md) and
 [results](MATCHED_INITIAL_BEHAVIOR_RESULTS.md) for all seeds, references,
 loss-matched comparisons and limitations.
+
+## Post-fitting coefficient learning-rate branches (planned 2026-10-06)
+
+The next limited intervention changes only the unconstrained coefficient
+parameter's learning rate after a successful 1600-update baseline prefix.
+[COEFFICIENT_LR_BRANCH_PLAN.md](COEFFICIENT_LR_BRANCH_PLAN.md) specifies seeds
+3, 4 and 6, training lengths 10/100, full model/AdamW/data-state cloning, and
+one-third/one-times/three-times continuations through total update 6400: six
+shared prefixes and 18 comparison paths. Existing records confirm eligibility;
+read-only trace analysis predicts a larger absolute immediate exponent response
+at length 10. Longer-horizon gap and common-loss predictions are explicit
+falsifiable hypotheses. No branch training has started. Complete this intervention
+and select one next direction from its results before expanding the research scope.
