@@ -6,6 +6,11 @@ Only existing measurements were reanalyzed to prepare this plan; no new model
 training or optimizer updates have been run. Complete this intervention and
 review the research direction before adding further experiment families.
 
+Execution update (2026-10-10): all six prefixes and 18 branches completed.
+The text below preserves the pre-experiment plan. See the
+[execution specification](COEFFICIENT_LR_BRANCH_SPEC.md) and
+[results and direction review](COEFFICIENT_LR_BRANCH_RESULTS.md).
+
 ## Question and estimand
 
 In an already fitted model, does changing the coefficient parameter's learning

@@ -80,6 +80,17 @@ holds initial attention/logits/loss fixed at a declared reference while changing
 the coefficient, then tests query/key factorization of the same initial scoring
 function. Its [launch specification](documents/training_length/MATCHED_INITIAL_BEHAVIOR_SPEC.md)
 records the 30 main controls, 12 conditional controls and two exact baseline replays.
+The [post-fitting coefficient-rate branches](documents/training_length/COEFFICIENT_LR_BRANCH_RESULTS.md)
+clone successful 1600-update model/AdamW/data states and compare three coefficient
+rates through 6400. All 18 paths and six exact historical baseline controls passed;
+the report evaluates fixed-update and common-loss predictions and selects one next check.
+The [held-out multiplier-2 validation](documents/training_length/COEFFICIENT_LR_MULTIPLIER2_RESULTS.md)
+then tests the saved effect-size forecasts on the same six parents: all twelve
+predictions passed the original tolerance, with systematic point underprediction.
+The [independent-seed validation](documents/training_length/COEFFICIENT_LR_NEWSEEDS_RESULTS.md)
+tests seeds 8 and 9 at rates 1 and 2 without fitting new-model response curves.
+All eight frozen effect forecasts passed; the report analyzes the larger length-10
+response using realized updates and Adam moment history.
 
 After the environment setup above, inspect the actual Stage 3 CLI:
 

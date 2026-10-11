@@ -191,3 +191,53 @@ read-only trace analysis predicts a larger absolute immediate exponent response
 at length 10. Longer-horizon gap and common-loss predictions are explicit
 falsifiable hypotheses. No branch training has started. Complete this intervention
 and select one next direction from its results before expanding the research scope.
+
+## Post-fitting coefficient learning-rate branch execution (2026-10-10)
+
+All six baseline prefixes and 18 comparison paths completed through total update
+6400 in 7.94 minutes, preserving model, AdamW, RNG and data progress at the branch.
+Six multiplier-1 final checkpoints, diagnostic series and epoch histories matched
+the original baselines exactly. All selected seeds retained fitting and showed
+the predicted exponent ordering, larger intervention effects at length 10, and
+length-gap ordering at equal updates and common length-100 BCE 0.01.
+See the [execution specification](COEFFICIENT_LR_BRANCH_SPEC.md) and
+[results](COEFFICIENT_LR_BRANCH_RESULTS.md) for every seed, update allocation,
+threshold crossings and analytical extrapolation limits. The selected next
+direction is a held-out coefficient multiplier 2; its quantitative forecasts
+are saved, but no additional branch was run.
+
+## Held-out coefficient multiplier 2 execution (2026-10-10)
+
+The user authorized the selected held-out rate. Six continuations reused the same
+full 1600-update parents and reached total update 6400 in 2.91 minutes for the
+valid execution. All twelve frozen effect predictions passed the original ±20%
+criterion at 6400 and common length-100 BCE 0.01, with maximum effect error 13.39%.
+Every effect exceeded its point forecast, so the phenomenological response model
+systematically underpredicted this new rate. Directional exponent ordering,
+larger length-10 response, length-gap ordering and retained fitting all passed.
+The first incomplete attempt was excluded for a CUDA deterministic-setting
+mismatch; the corrected run passed exact state/gradient/data checks.
+See the [specification](COEFFICIENT_LR_MULTIPLIER2_SPEC.md) and
+[results](COEFFICIENT_LR_MULTIPLIER2_RESULTS.md). The next selected direction is
+independent-initialization validation, with no additional training started.
+
+## Independent-seed validation execution (2026-10-10)
+
+Seeds 8 and 9 completed all eight coefficient-rate paths at lengths 10/100,
+branching at 1600 and ending at 6400, in 4.40 minutes. All four parents met the
+predeclared fitting gate; no seed was replaced. The old-seed normalized-effect
+rule and its ±20% effect tolerance were frozen before new training, and all eight
+numerical predictions were saved after the controls and before any rate-2 tail.
+All four 6400-update and four common-loss predictions passed, with maximum effect
+error 7.65%. Fitting and the larger length-10 response were retained.
+See the [specification](COEFFICIENT_LR_NEWSEEDS_SPEC.md) and
+[results](COEFFICIENT_LR_NEWSEEDS_RESULTS.md) for eligibility, forecasts, immutable
+state/data checks, threshold crossings and read-only optimizer analysis.
+
+The selected next direction is to explain the length response, especially the
+gradient history during fitting. Immediate response factors identify larger Adam
+normalized updates and softplus sensitivity at length 10. In the available old
+seed-3/4 traces, updates 1–200 contribute at most 0.0031% of the step-1600 second
+moment, leaving updates 201–1600 as the unresolved interval. These observations
+do not establish causal mediation. No additional rate, seed or model-assumption
+experiment was launched after this validation.

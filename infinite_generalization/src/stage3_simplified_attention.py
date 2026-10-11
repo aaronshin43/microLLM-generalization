@@ -1711,6 +1711,7 @@ def train_model(
     ] | None = None,
     update_observer: object | None = None,
     initial_state_transform: Callable[[SimplifiedLastQueryAttentionClassifier], None] | None = None,
+    epoch_observer: Callable[..., None] | None = None,
 ) -> tuple[SimplifiedLastQueryAttentionClassifier, int]:
     """Train the model, optionally observing initialization and completed updates.
 
@@ -1718,6 +1719,7 @@ def train_model(
     detached tokens and labels after each optimizer update. Validation does not
     notify the observer. Omitting it preserves the original training path.
     An explicit transform runs before the initial observation and optimizer creation.
+    An optional epoch observer runs after validation and history recording.
     """
 
     train_lengths = resolved_train_lengths(config)
@@ -1812,6 +1814,10 @@ def train_model(
                 "val_negative_accuracy": val_metrics["negative_accuracy"],
             }
         )
+
+        if epoch_observer is not None:
+            epoch_observer(model, optimizer, train_loaders, val_loaders,
+                           epoch, optimizer_updates, history_rows)
 
     write_csv(output_dir / "train_history.csv", history_rows)
     return model, optimizer_updates
