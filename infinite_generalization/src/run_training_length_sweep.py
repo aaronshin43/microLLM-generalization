@@ -122,9 +122,9 @@ def coefficient_state(model, optimizer):
 class CoefficientTrace:
     """Observe scalar updates without modifying gradients, moments, RNG or modes."""
 
-    def __init__(self, output, max_steps, deadline=None):
+    def __init__(self, output, max_steps, deadline=None, start_step=0):
         self.output, self.max_steps, self.deadline = output, max_steps, deadline
-        self.step = 0
+        self.step = start_step
         self.rows, self.pending, self.blocks, self.norm_rows = [], [], [], []
         self.batch_digest = hashlib.sha256()
         self.batch_rows = []
@@ -161,9 +161,10 @@ class CoefficientTrace:
         self.pending.append(row)
         if self.step % 200 == 0 or self.step == self.max_steps:
             path = self.output / "coefficient_trace.csv"
+            needs_header = not path.exists() or path.stat().st_size == 0
             with path.open("a", newline="", encoding="utf-8") as stream:
                 writer = csv.DictWriter(stream, fieldnames=list(row))
-                if self.step == len(self.pending):
+                if needs_header:
                     writer.writeheader()
                 writer.writerows(self.pending)
             block = {"update_lower": self.pending[0]["optimizer_updates"], "update_upper": self.step,

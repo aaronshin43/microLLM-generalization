@@ -266,3 +266,34 @@ See the [launch specification](LENGTH_SWEEP_SPEC.md) and
 The selected next action is a focused analysis of the length-300/1000 contrast
 across progress/loss before selecting a second-moment intervention. No further
 training, moment manipulation, curriculum or model extension was executed.
+
+## Training-length continuation to 12800 (executed 2026-10-24)
+
+The user authorized [LENGTH_EXTENSION_12800_PLAN.md](LENGTH_EXTENSION_12800_PLAN.md).
+Nine length-10/30/1000 paths for seeds 3/4/6 continued their full original
+6400-update states to 12800 in 6.37 minutes. Original optimizer groups, moments,
+RNG and data progress were preserved; seed-3 serialization/passivity checks at
+all three lengths matched exactly. No prefix was retrained or seed replaced.
+
+All nine retained fitting. Length 30 first exceeded $r=1$ at updates 10939,
+8809 and 8188 for seeds 3, 4 and 6, with no later step-level exit. Length 10
+remained above from its starting state. All length-1000 paths remain below 1
+at 12800; this is finite-budget non-entry, not evidence of permanent failure.
+Every final direct class test through length 10000 passed.
+
+The ordering $r_{10}>r_{30}>r_{1000}$ held for every seed at 12800 and every
+extension diagnostic. Both paired endpoint gaps widened. All nine paths reached
+the new common length-100 BCE targets 0.001, 0.0005 and 0.0001, retaining the
+same exponent ordering; matching these losses did not remove the contrast.
+Average growth slowed across the fixed windows despite continued exponent growth.
+
+All eighteen boundary-plus-gradient second-moment reconstructions passed the
+original tolerance. At 12800, inherited step-6400 memory still supplies
+99.8036%–99.9884% of the remaining second moment, while its absolute contribution
+has greatly decayed. This is weighted-history accounting, not causal mediation.
+See the [specification](LENGTH_EXTENSION_12800_SPEC.md) and
+[results](LENGTH_EXTENSION_12800_RESULTS.md) for exact crossings, censoring,
+head-aware predictions, full states, comparisons and compute accounting.
+The selected next action is focused analysis of the saved length-30/1000 growth,
+head and moment records before designing a limited optimizer-state intervention.
+No further training or moment intervention was executed.

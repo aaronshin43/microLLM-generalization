@@ -96,6 +96,10 @@ extends the map to lengths 10, 30, 100, 300 and 1000 for paired seeds 3/4/6,
 reusing six paths and adding nine with complete coefficient-update histories.
 The report separates fixed-update ordering, common-loss comparisons and a small
 early-loss reversal between lengths 300 and 1000.
+The [12800-update continuation](documents/training_length/LENGTH_EXTENSION_12800_RESULTS.md)
+preserves full 6400-update states for lengths 10/30/1000. All length-30 seeds
+cross the exponent threshold; length 1000 remains below it at the fixed endpoint.
+Paired exponent gaps widen and remain at the new matched evaluation losses.
 
 After the environment setup above, inspect the actual Stage 3 CLI:
 
