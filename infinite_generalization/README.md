@@ -91,6 +91,11 @@ The [independent-seed validation](documents/training_length/COEFFICIENT_LR_NEWSE
 tests seeds 8 and 9 at rates 1 and 2 without fitting new-model response curves.
 All eight frozen effect forecasts passed; the report analyzes the larger length-10
 response using realized updates and Adam moment history.
+The [baseline length sweep](documents/training_length/LENGTH_SWEEP_RESULTS.md)
+extends the map to lengths 10, 30, 100, 300 and 1000 for paired seeds 3/4/6,
+reusing six paths and adding nine with complete coefficient-update histories.
+The report separates fixed-update ordering, common-loss comparisons and a small
+early-loss reversal between lengths 300 and 1000.
 
 After the environment setup above, inspect the actual Stage 3 CLI:
 

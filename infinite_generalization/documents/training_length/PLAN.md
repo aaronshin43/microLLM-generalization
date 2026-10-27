@@ -241,3 +241,28 @@ seed-3/4 traces, updates 1–200 contribute at most 0.0031% of the step-1600 sec
 moment, leaving updates 201–1600 as the unresolved interval. These observations
 do not establish causal mediation. No additional rate, seed or model-assumption
 experiment was launched after this validation.
+
+## Baseline training-length sweep execution (2026-10-24)
+
+The user authorized [LENGTH_SWEEP_PLAN.md](LENGTH_SWEEP_PLAN.md). Nine new runs
+at lengths 30/300/1000 and seeds 3/4/6 completed at 6400 updates in 7.82 minutes;
+six existing length-10/100 baselines were verified and reused without retraining.
+All fifteen cells fit successfully and classify both classes correctly on the
+direct evaluation grid through 10000. Same-seed initial hashes match, historical
+files are unchanged, and passive recording checks passed at every new length.
+
+At 6400 and at common length-100 BCE 0.01, every seed shows decreasing coefficient
+and exponent with length, alongside increasing raw margin. The longer-length
+response flattens. At the predeclared companion BCE 0.02, length 1000 has a small
+larger exponent than length 300 in all three seeds; this sign reverses at BCE
+0.01 and 0.005. Preserve this progress-dependent observation and the 200-update
+interpolation limitation rather than extending a universal monotone claim.
+
+All nine complete coefficient histories and full 1600/6400 states were saved.
+The eighteen second-moment history checks pass; new lengths localize most moment
+accumulation to the early fitting transition. Old missing history remains missing.
+See the [launch specification](LENGTH_SWEEP_SPEC.md) and
+[results](LENGTH_SWEEP_RESULTS.md) for all cells, provenance, exposures and plots.
+The selected next action is a focused analysis of the length-300/1000 contrast
+across progress/loss before selecting a second-moment intervention. No further
+training, moment manipulation, curriculum or model extension was executed.

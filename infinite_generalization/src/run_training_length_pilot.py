@@ -95,7 +95,8 @@ def predicted_failure_log10(mode, values):
 class TrainingRecorder:
     """Record passive diagnostics and realized exposure after optimizer updates."""
 
-    def __init__(self, config, output, interval, reference_run=None, verify_step=1600):
+    def __init__(self, config, output, interval, reference_run=None, verify_step=1600,
+                 diagnostic_lengths=None):
         self.config, self.output, self.interval = config, output, interval
         self.updates = 0
         self.exposure = {str(length): {"sequences": 0, "tokens": 0, "positives": 0, "negatives": 0}
@@ -104,6 +105,7 @@ class TrainingRecorder:
         self.rows = []
         self.reference_run = reference_run
         self.verify_step = verify_step
+        self.diagnostic_lengths = EXPLICIT_LENGTHS if diagnostic_lengths is None else tuple(diagnostic_lengths)
 
     def __call__(self, model, tokens, labels):
         if tokens is None:
@@ -124,7 +126,7 @@ class TrainingRecorder:
             values = mechanism(model)
             totals = {key: sum(entry[key] for entry in self.exposure.values())
                       for key in ["sequences", "tokens", "positives", "negatives"]}
-            for length in EXPLICIT_LENGTHS:
+            for length in self.diagnostic_lengths:
                 gap, alpha = attention_gap(self.config.alpha_mode, values, math.log(length))
                 mass = sigmoid(gap)
                 positive_logit = values["head_slope"] * mass + values["head_intercept"]
@@ -172,7 +174,8 @@ def run_one(config, output, device, interval, reference_run=None, verify_step=16
     return finish_run(config, output, device, model, updates, recorder, started, reference_run)
 
 
-def finish_run(config, output, device, model, updates, recorder, started, reference_run=None):
+def finish_run(config, output, device, model, updates, recorder, started, reference_run=None,
+               explicit_lengths=EXPLICIT_LENGTHS):
     """Save and evaluate a completed path, including a fully resumed path."""
     assert updates == recorder.updates == config.max_train_steps
     assert sum(entry["sequences"] for entry in recorder.exposure.values()) == updates * config.batch_size
@@ -184,7 +187,7 @@ def finish_run(config, output, device, model, updates, recorder, started, refere
     write_json(output / "config.json", config_record)
     values = mechanism(model)
     explicit_rows, position_rows, non_target_rows, target_rows = [], [], [], []
-    for length in EXPLICIT_LENGTHS:
+    for length in explicit_lengths:
         row, positions, non_targets, targets = evaluate_length(
             model, length=length, examples=config.test_examples, eval_chunk_examples=config.eval_chunk_examples,
             eval_sampling_mode=config.eval_sampling_mode, batch_size=config.eval_batch_size,
